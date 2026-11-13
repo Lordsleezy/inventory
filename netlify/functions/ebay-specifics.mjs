@@ -4,7 +4,7 @@ import { json, corsHeaders, serviceClient, staffFromEvent } from "../lib/server.
 import { portalAdminFromEvent } from "../lib/portal-auth.mjs";
 import { catalogProductByGtin, ensureStoredEbayLeaf, refreshCategoryConditions, suggestCategories } from "../lib/ebay-catalog.mjs";
 import { refreshChannelCategoryFields } from "../lib/category-taxonomy.mjs";
-import { autofillUnitSpecifics, fillMissing, missingRequired, productAspects, unitAspects, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
+import { autofillUnitSpecifics, fillMissing, guessReceiveAspects, missingRequired, productAspects, unitAspects, supabaseSpecificsDeps } from "../lib/ebay-specifics.mjs";
 import { canonicalValue, clearInvalid, countUsage, rankValues } from "../lib/aspect-suggest.mjs";
 import { liveSpecificsForUnit } from "../lib/ebay-live-specifics.mjs";
 import { autoFillUnit, supabaseAutoFillDeps } from "../lib/auto-fill.mjs";
@@ -199,9 +199,13 @@ async function handle(event) {
         ...productAspects({ brand: identity.brand, model: identity.model }),
         ...unitAspects({ brand: identity.brand, model: identity.model, condition: identity.condition, upc: identity.upc }),
       };
-      const { attributes, filled } = fillMissing(body.attributes || {}, seed, fields);
+      const seeded = fillMissing(body.attributes || {}, seed, fields);
       const { data: tax } = await sb.from("channel_taxonomy").select("path").eq("channel", "ebay").eq("category_id", categoryId).maybeSingle();
-      const leafName = String(tax?.path || "").split(">").pop()?.trim() || "";
+      const path = String(tax?.path || body.path || "");
+      const leafName = path.split(">").pop()?.trim() || "";
+      const guessed = guessReceiveAspects(fields, seeded.attributes, identity, path);
+      const attributes = guessed.attributes;
+      const filled = [...new Set([...seeded.filled, ...guessed.filled])];
       const conditions = await conditionChoices(categoryId, leafName);
       return json(200, {
         ok: true, category_id: categoryId, path: tax?.path || null,

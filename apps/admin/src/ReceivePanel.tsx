@@ -1881,13 +1881,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const staged = await upload;
       if (receiveRequest.current === request) setStagedPhotoPaths(prev => [...prev, ...staged]);
       if (rejected) setWarning(`${rejected} photo(s) looked empty or too large and were skipped.`);
-      if (!manual && current && photoCheckedFor.current !== current.id) {
-        photoCheckedFor.current = current.id;
-        setPhotoVerifyPending(true);
-        setPhotoNeed('Checking the barcode against your actual-unit photo.');
-        setDialog('miss-photo');
-        void identifyMissPhoto(copied[0], true);
-      }
+      // AI photo identify is only for UPC/catalog misses (miss-photo dialog).
+      // Do not run it when the clerk takes a normal unit photo on a found UPC.
     } catch (e) {
       setError(`Photo upload failed. Your photo is kept on this device. Retry the photo upload. ${errText(e)}`);
     } finally {

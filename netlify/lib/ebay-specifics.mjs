@@ -5,10 +5,56 @@
  */
 import { normalizeGtin } from "./gtin-normalize.mjs";
 import { marketplaceGtin } from "./gtin.mjs";
-import { commonSiblingValue, textSuggestions } from "./aspect-suggest.mjs";
+import { commonSiblingValue, matchAllowedFromText, textSuggestions } from "./aspect-suggest.mjs";
 import { missingAspectNames } from "../../shared/ebay-category-present.mjs";
+import { confidentPhrase, pickTypeValue } from "./ebay-aspects.mjs";
 
 const text = (value) => String(value ?? "").trim();
+
+/**
+ * After Brand/Model/UPC seeds, fill every still-blank required/recommended aspect from
+ * title / brand / model / category path. If nothing matches a selection-only list, pick
+ * the first allowed value so Receive never blocks on an empty Type (clerk can edit later).
+ */
+export function guessReceiveAspects(fields = [], attributes = {}, identity = {}, path = "") {
+  const leaf = text(path).split(">").pop()?.trim() || "";
+  const title = text(identity.title);
+  const brand = text(identity.brand);
+  const model = text(identity.model);
+  const sources = [title, brand, model, path, leaf];
+  let { attributes: next, filled } = fillMissing(attributes, textSuggestions(fields, attributes, ...sources), fields);
+  const guessed = [...filled];
+  for (const def of fields || []) {
+    if (!(def.required || def.recommended)) continue;
+    if (text(next[def.name])) continue;
+    const name = text(def.name);
+    const lower = name.toLowerCase();
+    const allowed = def.allowed || [];
+    let value = "";
+    if (lower === "type" && allowed.length) {
+      value =
+        pickTypeValue(allowed, { title, brand, model, category: leaf }, {}, { categoryName: path, title }) ||
+        confidentPhrase(allowed, sources) ||
+        matchAllowedFromText(def, ...sources) ||
+        "";
+    } else if (allowed.length) {
+      value = matchAllowedFromText(def, ...sources) || confidentPhrase(allowed, sources) || "";
+    } else if (lower === "brand" && brand) {
+      value = brand;
+    } else if ((lower === "model" || lower === "mpn" || lower === "manufacturer part number") && model) {
+      value = model;
+    }
+    // Last resort for list-only required aspects: any allowed value beats a blank that blocks save.
+    if (!value && def.required && allowed.length && (def.selectionOnly || def.selection_only)) {
+      value = allowed[0];
+    }
+    if (!value) continue;
+    const applied = fillMissing(next, { [name]: value }, fields);
+    next = applied.attributes;
+    if (applied.filled.includes(name)) guessed.push(name);
+  }
+  return { attributes: next, filled: guessed };
+}
 
 /** Fill only blank aspects. Values for selection-only aspects must match an allowed value. */
 export function fillMissing(existing = {}, incoming = {}, fields = []) {

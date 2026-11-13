@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { autofillUnitSpecifics, fillMissing, missingRequired, aspectFieldsFromTaxonomy } from "./ebay-specifics.mjs";
+import { autofillUnitSpecifics, fillMissing, guessReceiveAspects, missingRequired, aspectFieldsFromTaxonomy } from "./ebay-specifics.mjs";
 
 const FIELDS = [
   { name: "Brand", required: true, allowed: [], selection_only: false },
@@ -39,6 +39,33 @@ test("fillMissing never overwrites a set value and only accepts allowed values f
   assert.deepEqual(fillMissing({}, { Type: "Iron" }, FIELDS).attributes, {});
   assert.deepEqual(missingRequired(FIELDS, { Brand: "X" }), ["Type"]);
   assert.deepEqual(missingRequired(FIELDS, { Brand: "X", Type: "Iron" }), ["Type"]);
+});
+
+test("guessReceiveAspects fills Type from the category path and never leaves required list blanks", () => {
+  const typeField = {
+    name: "Type",
+    required: true,
+    selection_only: true,
+    allowed: ["Audio Dock", "Electrostatic", "Flare Speaker", "Home Theater Speaker System", "In-Wall Speaker", "Neck Speaker"],
+  };
+  const path = "Consumer Electronics > Portable Audio & Headphones > Audio Docks & Mini Speakers";
+  const hit = guessReceiveAspects(
+    [typeField, { name: "Brand", required: true, allowed: [], selection_only: false }],
+    { Brand: "Infinity" },
+    { title: "Infinity X1 Stereo Wireless", brand: "Infinity", model: "Stereo, Wireless, Rech" },
+    path,
+  );
+  assert.equal(hit.attributes.Type, "Audio Dock");
+  assert.equal(hit.attributes.Brand, "Infinity");
+  assert.ok(hit.filled.includes("Type"));
+
+  const noHint = guessReceiveAspects(
+    [{ name: "Finish", required: true, selection_only: true, allowed: ["Matte", "Gloss"] }],
+    {},
+    { title: "Widget", brand: "", model: "" },
+    "Other > Stuff",
+  );
+  assert.equal(noHint.attributes.Finish, "Matte", "last-resort guess so Receive is not stuck");
 });
 
 test("Catalog API results fill aspects without overwriting existing values", async () => {
