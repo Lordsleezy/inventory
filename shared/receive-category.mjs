@@ -43,11 +43,13 @@ export function beddingCategoryName(list) {
 /**
  * Pick one store category after a scan.
  * Exact catalog names win. Otherwise one store name (or its singular) must appear in the product text.
- * An unrelated catalog name such as "Women" or "Home & Kitchen" stays blank so the list can still be typed.
  * Mattress pads, toppers, and protectors never map to Mattresses.
+ * When nothing honest matches, return Uncategorized (or the first list name) so Receive can save.
  */
 export function matchReceiveCategory(list, hints = {}) {
   const options = categoryChoices(list);
+  const fallback =
+    options.find((name) => /^uncategorized$/i.test(name)) || options[0] || "";
   const catalog = String(hints.category ?? "").trim();
   const blob = [catalog, hints.title, hints.brand, hints.model].map((part) => String(part ?? "")).join(" ").toLowerCase();
   if (isMattressAccessory(blob)) {
@@ -55,9 +57,9 @@ export function matchReceiveCategory(list, hints = {}) {
     if (bedding) return bedding;
     const exact = options.find((name) => name.toLowerCase() === catalog.toLowerCase());
     if (exact && !isPlainMattressCategory(exact)) return exact;
-    return "";
+    return fallback;
   }
-  if (!blob.trim()) return "";
+  if (!blob.trim()) return fallback;
   const exact = options.find((name) => name.toLowerCase() === catalog.toLowerCase());
   if (exact) return exact;
   const hits = options.filter((name) => {
@@ -69,5 +71,19 @@ export function matchReceiveCategory(list, hints = {}) {
     if (label.endsWith("s")) stems.push(label.slice(0, -1));
     return stems.some((stem) => stem.length >= 5 && blob.includes(stem));
   });
-  return hits.length === 1 ? hits[0] : "";
+  if (hits.length === 1) return hits[0];
+  // Prefer a unique strongest word overlap with the eBay path / title (e.g. Cookware).
+  const tokens = blob.split(/[^a-z0-9]+/).filter((t) => t.length >= 4);
+  let best = null;
+  for (const name of options) {
+    if (/^uncategorized$/i.test(name)) continue;
+    const label = name.toLowerCase();
+    const parts = label.split(/[^a-z0-9]+/).filter((t) => t.length >= 4);
+    const score = parts.reduce((n, part) => n + (tokens.includes(part) || blob.includes(part) ? part.length : 0), 0);
+    if (score <= 0) continue;
+    if (!best || score > best.score) best = { name, score };
+    else if (best && score === best.score && name !== best.name) best = { name: "", score }; // tie → fall back
+  }
+  if (best?.name) return best.name;
+  return fallback;
 }

@@ -244,6 +244,61 @@ html.dark .receive-panel.receive-v2,
   gap: 10px;
 }
 
+/* Native camera/file: input sits on the control so iOS PWA accepts the gesture. */
+.receive-capture-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  cursor: pointer;
+  margin: 0;
+  border: 1px solid var(--btn-border);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--btn-text);
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 650;
+  font-size: 14px;
+  box-sizing: border-box;
+  min-height: 44px;
+}
+html.app-mode .receive-capture-btn,
+html.dark .receive-capture-btn {
+  background: #2c2c2e;
+  color: #fff;
+  border-color: #3a3a3c;
+  min-height: 48px;
+}
+.receive-capture-btn.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: default;
+}
+.receive-capture-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  font-size: 0;
+}
+.receive-capture-tile {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.receive-capture-tile.is-disabled {
+  opacity: 0.45;
+  pointer-events: none;
+  cursor: default;
+}
+
 .floor-build-stamp {
   font-size: 12px;
   color: #9a9a9a;
