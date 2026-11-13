@@ -8,8 +8,13 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 
 test('phone receive sections toggle, and category preview does not need a SKU', async () => {
   const receive = await readFile(path.join(root, 'ReceivePanel.tsx'), 'utf8');
-  assert.match(receive, /const toggleSection = \(id: string\) => setOpenSec\(current => current === id \? '' : id\)/);
+  assert.match(receive, /const toggleSection = \(id: string\) => setOpenSecs\(current => \{/);
+  assert.match(receive, /Each Receive row toggles on its own/);
   assert.doesNotMatch(receive, /onOpen=\{setOpenSec\}/);
+  assert.doesNotMatch(receive, /open=\{openSec ===/);
+  const section = await readFile(path.join(root, 'ReceiveSection.tsx'), 'utf8');
+  assert.match(section, /is-collapsed/);
+  assert.match(section, /inert/);
   assert.match(receive, /className="rcv-dnl"/);
   assert.match(receive, /id="location"/);
   const fn = await readFile(path.join(root, '../../../netlify/functions/ebay-specifics.mjs'), 'utf8');

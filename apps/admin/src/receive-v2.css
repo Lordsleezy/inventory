@@ -290,9 +290,16 @@ html.app-mode .receive-app-nav button.is-dim { opacity: 1; color: #9a9a9a; }
   font: inherit;
 }
 .rcv-sec-btn strong { font-size: 16px; white-space: nowrap; }
+.rcv-sec-chevron { justify-self: end; width: 1.25rem; text-align: center; color: #9a9a9a; }
 .rcv-star, .rcv-status.bad, .rcv-needed { color: #FF453A; }
 .rcv-status { font-style: normal; color: #9a9a9a; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; text-align: right; }
 .rcv-sec-body { display: grid; gap: 12px; padding: 0 0 14px; min-width: 0; }
+/* keepMounted sections stay in the DOM while closed — never let them eat taps on the row below. */
+.rcv-sec-body.is-collapsed {
+  display: none !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
 .rcv-sec-body input, .rcv-sec-body select, .rcv-sec-body textarea { width: 100%; box-sizing: border-box; }
 .rcv-sec-body input[type=checkbox] { width: 22px; height: 22px; flex: 0 0 22px; }
 .rcv-found { display: grid; gap: 2px; padding: 8px 0 12px; }

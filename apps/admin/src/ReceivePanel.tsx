@@ -702,8 +702,21 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /** Store-only / not selling online — photo not required to receive. */
   const [doNotList, setDoNotList] = useState(false);
   const [showSaveValidation, setShowSaveValidation] = useState(false);
-  const [openSec, setOpenSec] = useState('photos');
-  const toggleSection = (id: string) => setOpenSec(current => current === id ? '' : id);
+  /** Each Receive row toggles on its own — opening Size must not collapse Item above it. */
+  const [openSecs, setOpenSecs] = useState<ReadonlySet<string>>(() => new Set(['photos']));
+  const sectionOpen = (id: string) => openSecs.has(id);
+  const toggleSection = (id: string) => setOpenSecs(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  const revealSection = (id: string) => setOpenSecs(current => {
+    if (current.has(id)) return current;
+    const next = new Set(current);
+    next.add(id);
+    return next;
+  });
   const [ebayAspects, setEbayAspects] = useState<ReceiveAspectState>({
     categoryId: null, path: null, fields: [], attributes: {}, na: {},
   });
@@ -1551,7 +1564,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (gaps.length || (!doNotList && channelMissing > 0)) {
       setShowSaveValidation(true);
       const names = [...gaps, ...(!doNotList && channelMissing > 0 ? ['channel specifics'] : [])];
-      setOpenSec(receiveSectionForGap(gaps[0] || 'item'));
+      revealSection(receiveSectionForGap(gaps[0] || 'item'));
       setError(`Still needed: ${names.join(', ')}.`);
       return;
     }
@@ -2160,7 +2173,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   useEffect(() => {
     if (!showForm) return;
     const first = liveMissing[0];
-    setOpenSec(first ? receiveSectionForGap(first) : 'photos');
+    setOpenSecs(new Set([first ? receiveSectionForGap(first) : 'photos']));
     if (!manual) requestAnimationFrame(() => upcInput.current?.focus());
   }, [showForm, manual, current?.id]);
   const unifiedV2 = true;
@@ -2492,7 +2505,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <strong>{merged?.title || form.title || 'Item'}</strong>
           <small>Found by UPC · filled in for you</small>
         </div>)}
-        {unifiedV2 && !(staffMode && doNotList) && <ReceiveSection id="photos" title="Photos" required={!mediaWaived} open={openSec === 'photos'} onOpen={toggleSection}
+        {unifiedV2 && !(staffMode && doNotList) && <ReceiveSection id="photos" title="Photos" required={!mediaWaived} open={sectionOpen('photos')} onOpen={toggleSection}
           tone={!personPhotoReady() && !mediaWaived ? 'bad' : 'muted'}
           status={(() => {
             const count = files.length || stagedPhotoPaths.length;
@@ -2537,7 +2550,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="item" title="Item" required={!doNotList} keepMounted open={openSec === 'item'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="item" title="Item" required={!doNotList} keepMounted open={sectionOpen('item')} onOpen={toggleSection}
           tone={liveMissing.some(g => receiveSectionForGap(g) === 'item') ? 'bad' : 'muted'}
           status={liveMissing.filter(g => receiveSectionForGap(g) === 'item').length
             ? (liveMissing.filter(g => receiveSectionForGap(g) === 'item').length === 1
@@ -2585,7 +2598,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         />
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="price" title="Price & condition" required={!doNotList} open={openSec === 'price'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="price" title="Price & condition" required={!doNotList} open={sectionOpen('price')} onOpen={toggleSection}
           tone={liveMissing.some(g => receiveSectionForGap(g) === 'price') ? 'bad' : 'muted'}
           status={form.ask && form.condition ? `$${form.ask} · ${form.condition}` : doNotList ? 'Optional' : 'Required'}>
         <div className="receive-v2-row2">
@@ -2613,7 +2626,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <ReceiveQuantity value={form.quantity} onChange={value => update('quantity', value)} disabled={busy} />
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="size" title="Size & weight" required={!mediaWaived} open={openSec === 'size'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="size" title="Size & weight" required={!mediaWaived} open={sectionOpen('size')} onOpen={toggleSection}
           tone={!dimensionsReady() && !mediaWaived ? 'bad' : 'muted'}
           status={dimensionsReady() ? (!manual && current && !trueMiss ? 'From UPC' : `${form.length} × ${form.width} × ${form.height} in · ${form.weight} lb`) : mediaWaived ? (doNotList ? 'Optional (not listed)' : 'Optional (defective)') : 'Required'}>
           <div className="receive-v2-dims">
@@ -2626,7 +2639,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <p className="rcv-note">Box weight is the packaged ship weight. Item weight is the product itself.</p>
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="location" title="Location" required={!doNotList} open={openSec === 'location'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="location" title="Location" required={!doNotList} open={sectionOpen('location')} onOpen={toggleSection}
           tone={!selectedLocation.trim() && !doNotList ? 'bad' : 'muted'}
           status={selectedLocation
             ? locationMenuLabel(receiveLocations.find(l => l.code === selectedLocation) || { code: selectedLocation })
@@ -2641,7 +2654,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {!selectedLocation.trim() && !doNotList && showSaveValidation && <span className="receive-v2-msg">{receiveFieldMessage('location')}</span>}
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="upc" title="UPC" open={openSec === 'upc'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="upc" title="UPC" open={sectionOpen('upc')} onOpen={toggleSection}
           tone={invalid('upc') ? 'bad' : 'muted'}
           status={form.noUpc ? 'Not set' : (form.upc || current?.upc || 'Not set')}>
         <label className={invalid('upc') ? 'receive-v2-invalid' : undefined}>
@@ -2670,11 +2683,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
         </ReceiveSection>}
 
-        {!staffMode && <ReceiveSection id="sell" title="Sell on" open={openSec === 'sell'} onOpen={toggleSection} status={channels.length ? channels.map(c => c === 'tiktok' ? 'TikTok' : c === 'ebay' ? 'eBay' : 'Amazon').join(', ') : 'None'}>
+        {!staffMode && <ReceiveSection id="sell" title="Sell on" open={sectionOpen('sell')} onOpen={toggleSection} status={channels.length ? channels.map(c => c === 'tiktok' ? 'TikTok' : c === 'ebay' ? 'eBay' : 'Amazon').join(', ') : 'None'}>
           <ChannelPicker bare value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="flags" title="Flags" open={openSec === 'flags'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="flags" title="Flags" open={sectionOpen('flags')} onOpen={toggleSection}
           status={[doNotShip && 'Do not ship', doNotList && 'Do not list', isDefectiveCondition(form.condition) && 'Defective'].filter(Boolean).join(' · ') || 'None'}>
           {!staffMode && <label className="rcv-check"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not ship</label>}
           <label className="rcv-check"><input type="checkbox" checked={doNotList} onChange={e => { const on = e.target.checked; setDoNotList(on); if (on) setChannels([]); }} /> {staffMode ? 'DNL — Do not list' : 'Do not list for sale'}</label>
@@ -2682,7 +2695,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {needNoteForScratch && <label>Defect note<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="details" title="Details" open={openSec === 'details'} onOpen={toggleSection}
+        {!(staffMode && doNotList) && <ReceiveSection id="details" title="Details" open={sectionOpen('details')} onOpen={toggleSection}
           tone={liveMissing.includes('store category') || !ebayCheck.ready ? 'bad' : 'muted'}
           status={liveMissing.includes('store category') ? 'Store category' : ebayCheck.text}>
           <p className="rcv-note">eBay check</p>
@@ -2701,7 +2714,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {!staffMode && <label>Manifest<select value={manifestId} onChange={e => setManifestId(e.target.value)}><option value="">No manifest</option>{manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}</select></label>}
         </ReceiveSection>}
 
-        {!staffMode && <ReceiveSection id="bundle" title="Bundle items" open={openSec === 'bundle'} onOpen={toggleSection} status="Optional">
+        {!staffMode && <ReceiveSection id="bundle" title="Bundle items" open={sectionOpen('bundle')} onOpen={toggleSection} status="Optional">
           <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />
         </ReceiveSection>}
 
@@ -2745,7 +2758,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>}
       <div className="receive-v2-pin">
-        {liveMissing.length > 0 && <button type="button" className="rcv-needed" onClick={() => { setShowSaveValidation(true); setOpenSec(receiveSectionForGap(liveMissing[0])); }}>
+        {liveMissing.length > 0 && <button type="button" className="rcv-needed" onClick={() => { setShowSaveValidation(true); revealSection(receiveSectionForGap(liveMissing[0])); }}>
           Still needed: {liveMissing.join(', ')}
         </button>}
         <button type="submit" className={`receive-v2-save${formValid ? '' : ' is-dim'}`} disabled={busy || photoBusy || !formValid}>
