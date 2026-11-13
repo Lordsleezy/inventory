@@ -12,8 +12,11 @@ test('phone receive sections toggle, and category preview does not need a SKU', 
   assert.doesNotMatch(receive, /onOpen=\{setOpenSec\}/);
   assert.match(receive, /className="rcv-dnl"/);
   assert.match(receive, /id="location"/);
+  assert.doesNotMatch(receive, /Checking the barcode against your actual-unit photo/);
+  assert.match(receive, /AI photo identify is only for UPC\/catalog misses/);
   const fn = await readFile(path.join(root, '../../../netlify/functions/ebay-specifics.mjs'), 'utf8');
   assert.match(fn, /body\.action !== "preview-receive"/);
+  assert.match(fn, /guessReceiveAspects/);
 });
 
 test('phone item edit keeps the desktop drawer on the desktop path', async () => {
