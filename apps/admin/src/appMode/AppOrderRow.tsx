@@ -20,6 +20,9 @@ type Props = {
   onUrl: (path: string, url: string) => void;
   showUpload?: boolean;
   onUpload?: (file: File) => void;
+  /** Verify weight tab: open the order to enter weight (not a label upload). */
+  showAddWeight?: boolean;
+  onAddWeight?: () => void;
   showStepBack?: boolean;
   onStepBack?: () => void;
   showPackaged?: boolean;
@@ -35,7 +38,8 @@ type Props = {
 
 export function AppOrderRow({
   order, client, thumbPath, photoUrls, locationCode, money, channelName, trackingTail,
-  onOpen, onPrint, onUrl, showUpload, onUpload, hideMoney = false, showStepBack, onStepBack,
+  onOpen, onPrint, onUrl, showUpload, onUpload, showAddWeight, onAddWeight,
+  hideMoney = false, showStepBack, onStepBack,
   showPackaged, onPackaged, packagedBusy, showMarkShipped, onMarkShipped,
   selectMode = false, selected = false, onToggleSelect, suggestHint,
 }: Props) {
@@ -52,7 +56,12 @@ export function AppOrderRow({
       : [channelName, money(order.item_cents || 0), trackingTail].filter(Boolean).join(' · ');
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
   const showActions = Boolean(
-    (hasLabel(order) && onPrint) || (showUpload && onUpload) || (showStepBack && onStepBack) || (showPackaged && onPackaged) || (showMarkShipped && onMarkShipped),
+    (hasLabel(order) && onPrint)
+    || (showAddWeight && onAddWeight)
+    || (showUpload && onUpload)
+    || (showStepBack && onStepBack)
+    || (showPackaged && onPackaged)
+    || (showMarkShipped && onMarkShipped),
   );
   const problemText = needsWeight ? 'Verify weight' : needsLabel ? 'Needs label' : chip.text;
 
@@ -104,6 +113,15 @@ export function AppOrderRow({
           )}
           {hasLabel(order) && onPrint && (
             <button type="button" className="app-order-action-outline" onClick={(e) => { e.stopPropagation(); onPrint(); }}>Print</button>
+          )}
+          {showAddWeight && onAddWeight && (
+            <button
+              type="button"
+              className="app-order-action-outline"
+              onClick={(e) => { e.stopPropagation(); onAddWeight(); }}
+            >
+              Add weight
+            </button>
           )}
           {showUpload && onUpload && (
             <label className="app-order-action-outline app-order-upload-v2" onClick={(e) => e.stopPropagation()}>

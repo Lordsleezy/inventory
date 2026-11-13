@@ -840,7 +840,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
                 onOpen={(o) => { setOpenShipmentId(null); setOpen(o); }}
                 onOpenShipment={() => { setOpen(null); setOpenShipmentId(shipment.id); }}
                 onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
-                showUpload={isAdmin && orderNeedsLabel(lead)}
+                showAddWeight={seg === 'verifyWeight'}
+                onAddWeight={() => { setOpenShipmentId(null); setOpen(lead); }}
+                showUpload={seg === 'needsLabel' && isAdmin && orderNeedsLabel(lead)}
                 onUpload={(f) => void uploadLabel(lead, f)}
                 onPrint={hasLabel(lead) ? () => void printLabel(lead) : undefined}
                 showPackaged={rowPackaged && shipment.items.some((o) => orderCanMarkPackaged(o))}
@@ -875,7 +877,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
               onOpen={() => setOpen(o)}
               onPrint={hasLabel(o) ? () => void printLabel(o) : undefined}
               onUrl={(p, u) => mergePhotoUrls({ [p]: u })}
-              showUpload={isAdmin && orderNeedsLabel(o)}
+              showAddWeight={seg === 'verifyWeight'}
+              onAddWeight={() => setOpen(o)}
+              showUpload={seg === 'needsLabel' && isAdmin && orderNeedsLabel(o)}
               onUpload={(f) => void uploadLabel(o, f)}
               showPackaged={seg === 'toShip' && orderCanMarkPackaged(o)}
               onPackaged={() => void markPackaged(o)}
