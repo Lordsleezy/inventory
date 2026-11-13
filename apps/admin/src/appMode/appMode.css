@@ -240,16 +240,21 @@ html.app-mode .app-cost-entry input::placeholder { color: #8e8e93; }
 html.app-mode .app-cost-entry button {
   border: 0;
   border-radius: 8px;
-  background: #fff; color: #000;
+  /* Keep Submit readable on dark Missing cost rows (was white-on-white). */
+  background: #0a84ff;
   color: #fff;
   font-size: 14px;
   font-weight: 600;
   line-height: 1.2;
-  padding: 8px 8px;
+  padding: 8px 10px;
   min-height: 36px;
   white-space: nowrap;
 }
-html.app-mode .app-cost-entry button:disabled { opacity: 0.55; }
+html.app-mode .app-cost-entry button:disabled {
+  background: #3a3a3c;
+  color: #8e8e93;
+  opacity: 1;
+}
 html.app-mode .app-cost-error {
   margin: 0;
   padding: 0 14px 10px;
