@@ -3,7 +3,7 @@ import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 import { scannerLifecycle } from './scannerLifecycle';
 import { commitReceive } from './receiveCommit';
 import { isDnsType } from './dns';
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FocusEvent } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FocusEvent, type RefObject } from 'react';
 import { ChannelPicker, type ChannelId } from './ChannelCheckboxes';
 import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -35,6 +35,50 @@ function preferNativeCapture() {
   return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
     || window.matchMedia('(display-mode: standalone)').matches
     || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+}
+
+/**
+ * File picker that opens from a real user gesture on the <input> itself.
+ * Programmatic .click() on a sr-only/aria-hidden input is blocked on many
+ * iPhone Safari / installed PWA builds — overlay the input on the control instead.
+ */
+export function CaptureFileButton({
+  label,
+  className,
+  disabled,
+  capture,
+  multiple,
+  inputRef,
+  onFiles,
+}: {
+  label: string;
+  className?: string;
+  disabled?: boolean;
+  capture?: boolean;
+  multiple?: boolean;
+  inputRef?: RefObject<HTMLInputElement | null>;
+  onFiles: (files: FileList | null) => void | Promise<void>;
+}) {
+  return (
+    <label className={`receive-capture-btn${className ? ` ${className}` : ''}${disabled ? ' is-disabled' : ''}`}>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        multiple={multiple || undefined}
+        capture={capture ? 'environment' : undefined}
+        disabled={disabled}
+        className="receive-capture-input"
+        onChange={e => {
+          const input = e.currentTarget;
+          const files = input.files;
+          // Copy/upload before clearing — iOS often invalidates the File after reset.
+          void Promise.resolve(onFiles(files)).finally(() => { input.value = ''; });
+        }}
+      />
+      <span>{label}</span>
+    </label>
+  );
 }
 
 const PHOTO_MAX_BYTES = 15 * 1024 * 1024;
@@ -636,23 +680,12 @@ function CameraScanner({ onDetect, onFile, onClose }: {
         <h3>Scan barcode</h3>
         {err ? <p className="error">{err}</p> : <video ref={video} className="receive-video" playsInline muted />}
         <div className="actions">
-          <input
-            ref={fileInput}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="sr-only"
-            aria-hidden
-            tabIndex={-1}
-            onChange={e => {
-              const f = e.target.files?.[0];
-              e.target.value = '';
-              if (f) onFile(f);
-            }}
+          <CaptureFileButton
+            inputRef={fileInput}
+            label="Take photo of barcode"
+            capture
+            onFiles={files => { const f = files?.[0]; if (f) onFile(f); }}
           />
-          <button type="button" className="secondary receive-file-btn" onClick={() => fileInput.current?.click()}>
-            Take photo of barcode
-          </button>
           <button type="button" className="secondary" onClick={onClose}>Close</button>
         </div>
       </div>
@@ -1262,9 +1295,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         });
         if (!next) {
           const leaf = path.split('>').pop()?.trim().toLowerCase() || '';
-          next = names.find(name => name.toLowerCase() === leaf) || '';
+          next = names.find(name => name.toLowerCase() === leaf)
+            || names.find(name => /^uncategorized$/i.test(name))
+            || names[0]
+            || '';
         }
-        return next ? { ...prev, category: next } : prev;
+        return next && next !== prev.category ? { ...prev, category: next } : prev;
       });
     } catch {
       /* Opening Item still runs the same suggestion. */
@@ -1446,6 +1482,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     photoSessionKey.current = manualPhotoSession(storeId, true);
   }
 
+  /** Prefer the typed value; otherwise match or Uncategorized so save is not blocked. */
+  function storeCategoryValue() {
+    const cur = form.category.trim();
+    if (cur) return cur;
+    return matchReceiveCategory(choices(options?.categories), {
+      category: ebayAspects.path || '',
+      title: form.title,
+      brand: form.brand,
+      model: form.model,
+    });
+  }
+
   /* ----- validation / completeness ----- */
   type Parsed = { ask: number | null; cost: number | null; dims: (number | null)[] };
   function parse(): Parsed | null {
@@ -1523,7 +1571,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
     const gaps = listingGaps(p);
     const out: string[] = [...gaps.map(g => (g === 'ebay_category' ? 'category' : g === 'ebay_aspects' ? 'item specifics' : g))];
-    if (!form.category.trim() && !out.includes('store category')) out.push('store category');
+    if (!storeCategoryValue() && !out.includes('store category')) out.push('store category');
     return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, hasLocation });
   }
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
@@ -1563,6 +1611,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
     const parsed = parse();
     if (!parsed) return;
+    const ensuredCategory = storeCategoryValue();
+    if (ensuredCategory && ensuredCategory !== form.category.trim()) {
+      setForm(prev => (prev.category.trim() ? prev : { ...prev, category: ensuredCategory }));
+    }
     const gaps = missingFor(parsed);
     if (gaps.length || (!doNotList && channelMissing > 0)) {
       setShowSaveValidation(true);
@@ -1607,7 +1659,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         p_brand: staffMode && doNotList ? '' : brandValue,
         p_model: modelValue,
         p_title: titleValue,
-        p_category: form.category.trim() || null,
+        p_category: storeCategoryValue() || null,
         p_description: form.description.trim() || null,
         p_condition: staffMode && doNotList ? SCRATCH : (form.condition || null),
         p_test_status: form.testStatus || null,
@@ -2344,22 +2396,24 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <button type="button" className="text-button" disabled={photoBusy} onClick={() => current && retry(current)}>Rescan</button>
         </div>
         <div className={`receive-photo-first${storePhoneMode && stockPhotoPath ? ' has-stock-photo' : ''}`}>
-          <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
-            onChange={e => { const input=e.currentTarget; void ingestFiles(input.files).finally(() => {input.value='';}); }} />
           {storePhoneMode ? <>
             <div className={`receive-stock-photo${stockPhotoPath ? ' stock-photo-ready' : ''}`}>
               {merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo" /> : <div aria-hidden="true">▯</div>}
               <span>{stockPhotoBusy ? 'Saving stock photo…' : stockPhotoPath ? '✓ Stock photo · ready' : merged?.images?.[0] ? stockPhotoError ? 'Stock photo · tap save to retry' : 'Stock photo available' : 'Stock photo unavailable'}</span>
             </div>
-            <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
+            <label className={`receive-unit-photo-tile receive-capture-tile${files.length ? ' has-photo' : ''}${photoBusy || busy ? ' is-disabled' : ''}`}>
+              <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="receive-capture-input" disabled={photoBusy || busy}
+                onChange={e => { const input = e.currentTarget; void Promise.resolve(ingestFiles(input.files)).finally(() => { input.value = ''; }); }} />
               {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Add photo</strong><span>{doNotList ? 'optional for store-only' : stockPhotoPath ? 'optional' : merged?.images?.[0] ? 'stock photo can save this unit' : 'required to save'}</span></>}
               {photoBusy && <span>Uploading…</span>}
-            </button>
+            </label>
           </> : <>
-            <button type="button" className={`receive-unit-photo-tile${files.length ? ' has-photo' : ''}`} disabled={photoBusy || busy} onClick={() => confirmPhotoFile.current?.click()}>
+            <label className={`receive-unit-photo-tile receive-capture-tile${files.length ? ' has-photo' : ''}${photoBusy || busy ? ' is-disabled' : ''}`}>
+              <input ref={confirmPhotoFile} type="file" accept="image/*" capture="environment" className="receive-capture-input" disabled={photoBusy || busy}
+                onChange={e => { const input = e.currentTarget; void Promise.resolve(ingestFiles(input.files)).finally(() => { input.value = ''; }); }} />
               {previews[0] ? <img src={previews[0]} alt="Actual unit photo" /> : <><strong>📷 Take photo</strong><span>{doNotList ? 'Optional for store-only' : stockPhotoPath ? 'Stock photo can save this unit' : 'Required to save'}</span></>}
               {photoBusy && <span>Uploading…</span>}
-            </button>
+            </label>
             <div className="receive-stock-photo">{merged?.images?.[0] ? <img src={merged.images[0]} alt="Catalog stock photo, not the unit" /> : <div aria-hidden="true">▯</div>}<span>Stock photo</span></div>
           </>}
         </div>
@@ -2515,12 +2569,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           })()}>
         <div ref={el => { fieldRefs.current.photo = el; }} className={invalid('photo') ? 'receive-v2-invalid' : undefined}>
           <div className="receive-v2-photo-actions">
-            <input ref={takePhotoFile} type="file" accept="image/*" capture="environment" className="sr-only" aria-hidden tabIndex={-1}
-              onChange={e => { const input = e.currentTarget; void ingestFiles(input.files).finally(() => { input.value = ''; }); }} />
-            <input ref={choosePhotoFile} type="file" accept="image/*" multiple className="sr-only" aria-hidden tabIndex={-1}
-              onChange={e => { const input = e.currentTarget; void ingestFiles(input.files).finally(() => { input.value = ''; }); }} />
-            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => takePhotoFile.current?.click()}>{photoBusy ? 'Saving…' : 'Take photo'}</button>
-            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => choosePhotoFile.current?.click()}>Choose photos</button>
+            <CaptureFileButton
+              inputRef={takePhotoFile}
+              disabled={photoBusy || busy}
+              capture
+              label={photoBusy ? 'Saving…' : 'Take photo'}
+              onFiles={files => ingestFiles(files)}
+            />
+            <CaptureFileButton
+              inputRef={choosePhotoFile}
+              disabled={photoBusy || busy}
+              multiple
+              label="Choose photos"
+              onFiles={files => ingestFiles(files)}
+            />
           </div>
           {hasFiles && <div className="receive-photos">{files.map((f, i) => <figure key={`${f.name}-${f.size}-${i}`}>
             <img src={previews[i]} alt={`Photo ${i + 1}`} />
@@ -2722,8 +2784,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {!unifiedV2 && <div ref={el => { fieldRefs.current.photo = el; }} className={`unit-edit-wide${invalid('photo') ? ' receive-v2-invalid' : ''}`}>
           <span className="receive-v2-label">Photos<span className="receive-v2-req"> *</span></span>
           <div className="receive-v2-photo-actions">
-            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => takePhotoFile.current?.click()}>Take photo</button>
-            <button type="button" className="secondary" disabled={photoBusy || busy} onClick={() => choosePhotoFile.current?.click()}>Choose photos</button>
+            <CaptureFileButton
+              inputRef={takePhotoFile}
+              disabled={photoBusy || busy}
+              capture
+              label="Take photo"
+              onFiles={files => ingestFiles(files)}
+            />
+            <CaptureFileButton
+              inputRef={choosePhotoFile}
+              disabled={photoBusy || busy}
+              multiple
+              label="Choose photos"
+              onFiles={files => ingestFiles(files)}
+            />
           </div>
         </div>}
 
@@ -2814,26 +2888,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <strong>{text(photoCandidate.title)}</strong>
           <span>{[text(photoCandidate.brand) || 'No visible brand', text(photoCandidate.model), text(photoCandidate.size), text(photoCandidate.color)].filter(Boolean).join(' · ')}</span>
         </div>}
-          <input
-          ref={missPhotoFile}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="sr-only"
-          aria-hidden
-          tabIndex={-1}
-          onChange={e => {
-            const input = e.currentTarget;
-            const file = input.files?.[0] || null;
-            input.value = '';
-            void identifyMissPhoto(file);
-          }}
-        />
-        <input ref={missChooseFile} type="file" accept="image/*" className="sr-only" aria-label="Choose product photo" onChange={e => {
-          const file = e.currentTarget.files?.[0] || null;
-          e.currentTarget.value = '';
-          void identifyMissPhoto(file);
-        }} />
         {photoCandidate ? <div className="actions">
           <button type="button" disabled={photoIdBusy} autoFocus onClick={() => void choosePhotoIdentity(true)}>Use photo product</button>
           {text(photoCandidate.brand) && <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => void choosePhotoIdentity(true, true)}>No brand</button>}
@@ -2842,10 +2896,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <button type="button" className="text-button" onClick={dismissPhotoCheck}>Cancel</button>
           <button type="button" className="text-button" onClick={skipCurrent}>Discard this scan</button>
         </div> : <div className="actions">
-          <button type="button" disabled={photoIdBusy} autoFocus onClick={() => missPhotoFile.current?.click()}>
-            {photoIdError ? 'Retry photo' : 'Yes — take photo'}
-          </button>
-          <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => missChooseFile.current?.click()}>Choose photo</button>
+          <CaptureFileButton
+            inputRef={missPhotoFile}
+            disabled={photoIdBusy}
+            capture
+            label={photoIdError ? 'Retry photo' : 'Yes — take photo'}
+            onFiles={files => identifyMissPhoto(files?.[0] || null)}
+          />
+          <CaptureFileButton
+            inputRef={missChooseFile}
+            disabled={photoIdBusy}
+            label="Choose photo"
+            onFiles={files => identifyMissPhoto(files?.[0] || null)}
+          />
           {photoVerifyPending && current?.result?.merged?.title && <button type="button" className="secondary" disabled={photoIdBusy} onClick={() => void choosePhotoIdentity(false)}>Keep barcode product</button>}
           <button type="button" className="secondary" onClick={dismissPhotoCheck}>Enter details myself</button>
           <button type="button" className="text-button" onClick={dismissPhotoCheck}>Cancel</button>

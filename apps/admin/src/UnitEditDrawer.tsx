@@ -812,11 +812,17 @@ export function UnitEditDrawer({
               {(p.is_primary || p.source === 'stock') && <small>{p.source === 'stock' ? 'STOCK' : 'Primary'}</small>}
             </button>
           ))}
-          <button type="button" className="unit-edit-photo-add" onClick={() => cameraInput.current?.click()} disabled={busy}>＋<small>Camera</small></button>
-          <button type="button" className="unit-edit-photo-add" onClick={() => fileInput.current?.click()} disabled={busy}>▧<small>Library</small></button>
+          <label className={`unit-edit-photo-add receive-capture-tile${busy ? ' is-disabled' : ''}`}>
+            <input ref={cameraInput} type="file" accept="image/*" capture="environment" multiple disabled={busy} className="receive-capture-input"
+              onChange={e => { const input = e.currentTarget; void Promise.resolve(addPhotos(e.target.files)).finally(() => { input.value = ''; }); }} />
+            ＋<small>Camera</small>
+          </label>
+          <label className={`unit-edit-photo-add receive-capture-tile${busy ? ' is-disabled' : ''}`}>
+            <input ref={fileInput} type="file" accept="image/*" multiple disabled={busy} className="receive-capture-input"
+              onChange={e => { const input = e.currentTarget; void Promise.resolve(addPhotos(e.target.files)).finally(() => { input.value = ''; }); }} />
+            ▧<small>Library</small>
+          </label>
         </div>
-        <input ref={cameraInput} type="file" accept="image/*" capture="environment" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
-        <input ref={fileInput} type="file" accept="image/*" multiple hidden disabled={busy} onChange={e => void addPhotos(e.target.files)} />
         {appMode ? (
           <div className="unit-edit-photo-tools">
             <span>Drag to reorder</span>

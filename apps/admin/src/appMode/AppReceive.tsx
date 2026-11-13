@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { displayProductTitle } from '@floor/store';
-import { decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
+import { CaptureFileButton, decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
 import { BundleReceive } from '../BundleReceive';
 import { AppItemDetail } from './AppItemDetail';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
@@ -127,20 +127,17 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
         <button type="submit">Go</button>
       </form>
 
-      <input
-        ref={homeCamera}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="sr-only"
-        aria-hidden
-        tabIndex={-1}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          e.target.value = '';
-          if (!file) return;
-          setCameraError('');
-          void decodeBarcodeFile(file).then((code) => {
+      <div className="rcv-home-actions">
+        {/* Input must receive the tap itself — programmatic .click() is blocked on iOS PWA. */}
+        <CaptureFileButton
+          inputRef={homeCamera}
+          capture
+          label="Use camera"
+          onFiles={async (files) => {
+            const file = files?.[0];
+            if (!file) return;
+            setCameraError('');
+            const code = await decodeBarcodeFile(file);
             if (code) {
               setPendingUpc(code);
               openForm(false);
@@ -148,13 +145,8 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
               setCameraError('Couldn’t read a barcode from that photo. Try again or type the digits.');
               openForm(false);
             }
-          });
-        }}
-      />
-
-      <div className="rcv-home-actions">
-        {/* Must open the file picker in this tap — deferred clicks are blocked on iOS. */}
-        <button type="button" className="secondary" onClick={() => homeCamera.current?.click()}>Use camera</button>
+          }}
+        />
         <button type="button" className="secondary" onClick={() => openForm(true)}>No barcode</button>
       </div>
       {!staffMode && <button type="button" className="text-button rcv-bundle" onClick={() => setPhase('bundle')}>Bundle items</button>}

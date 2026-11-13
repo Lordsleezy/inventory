@@ -387,7 +387,7 @@ test("mattress pads, toppers, and protectors do not map to Mattresses or get nev
   ];
   for (const item of accessories) {
     assert.equal(matchReceiveCategory(STORE_CATEGORIES, item), "Mattress Pads & Toppers");
-    assert.equal(matchReceiveCategory(LIVE_STORE_CATEGORIES, item), "");
+    assert.equal(matchReceiveCategory(LIVE_STORE_CATEGORIES, item), "Uncategorized");
     assert.equal(amazonNeverListReason({ ...item, category: "Mattresses" }), null);
     assert.equal(amazonNeverListReason({ ...item, category: "Mattress Pads & Toppers" }), null);
   }
@@ -406,7 +406,11 @@ test("mattress pads, toppers, and protectors do not map to Mattresses or get nev
     category: "Women",
     title: "Niki Raglan Baseball Tee",
     brand: "Niki",
-  }), "");
+  }), "Uncategorized");
+  assert.equal(matchReceiveCategory(LIVE_STORE_CATEGORIES, {
+    category: "Portable Audio & Headphones > Audio Docks & Mini Speakers",
+    title: "Infinity X1 Stereo Wireless Worklight",
+  }), "Uncategorized");
   assert.deepEqual(filterCategoryOptions(STORE_CATEGORIES, "matt"), ["Mattresses", "Mattress Pads & Toppers"]);
   assert.deepEqual(filterCategoryOptions(STORE_CATEGORIES, ""), STORE_CATEGORIES);
   assert.deepEqual(filterCategoryOptions(STORE_CATEGORIES, "Mattresses"), STORE_CATEGORIES);
