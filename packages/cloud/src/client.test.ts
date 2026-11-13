@@ -54,8 +54,42 @@ test("authErrorMessage maps WebKit/network failures to a reachability sentence",
   const msg = authErrorMessage(new TypeError("Load failed"));
   assert.match(msg, /Can't reach Floor cloud/);
   assert.match(msg, /Wi‑Fi/);
+  assert.match(msg, /cellular|hotspot/i);
   assert.match(msg, /rebuild/i);
   assert.match(authErrorMessage({ message: "Failed to fetch" }), /Can't reach Floor cloud/);
   assert.match(authErrorMessage({ message: "NetworkError when attempting to fetch resource." }), /Can't reach Floor cloud/);
   assert.match(authErrorMessage({ message: "Network request failed" }), /Can't reach Floor cloud/);
+});
+
+test("resolveFloorSupabaseUrl uses the admin same-origin proxy", async () => {
+  const { resolveFloorSupabaseUrl, FLOOR_SUPABASE_PROXY_PATH } = await import("./client.ts");
+  const baked = "https://example.supabase.co";
+  assert.equal(resolveFloorSupabaseUrl(baked), baked);
+
+  const previous = globalThis.location;
+  // jsdom-less node: stub location like the store phone on Floor Admin.
+  Object.defineProperty(globalThis, "location", {
+    configurable: true,
+    value: {
+      hostname: "admin.openboxindustries.com",
+      origin: "https://admin.openboxindustries.com",
+    },
+  });
+  try {
+    assert.equal(
+      resolveFloorSupabaseUrl(baked),
+      `https://admin.openboxindustries.com${FLOOR_SUPABASE_PROXY_PATH}`,
+    );
+    Object.defineProperty(globalThis, "location", {
+      configurable: true,
+      value: { hostname: "localhost", origin: "http://localhost:5173" },
+    });
+    assert.equal(resolveFloorSupabaseUrl(baked), baked);
+  } finally {
+    if (previous === undefined) {
+      Reflect.deleteProperty(globalThis, "location");
+    } else {
+      Object.defineProperty(globalThis, "location", { configurable: true, value: previous });
+    }
+  }
 });

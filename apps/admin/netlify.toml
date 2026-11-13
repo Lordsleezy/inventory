@@ -48,6 +48,16 @@
   status = 200
   force = true
 
+# Same-origin proxy for Floor cloud (Supabase). Store Wi‑Fi / phone lockdowns that
+# allow admin.openboxindustries.com but block *.supabase.co still reach auth, REST,
+# and storage through Netlify. Keep this ahead of the SPA fallback.
+# Project URL is the public anon API host (same value as VITE_SUPABASE_URL).
+[[redirects]]
+  from = "/api/sb/*"
+  to = "https://zoukmsmbztcuyoslvikp.supabase.co/:splat" # pragma: allowlist secret
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

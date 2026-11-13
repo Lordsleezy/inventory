@@ -5,6 +5,7 @@ const REMOTE = (import.meta.env.VITE_FLOOR_FUNCTIONS_URL || 'https://inventoryob
  * Resolve a Floor function URL.
  * On the admin portal host, use the same-origin `/api/floor/*` proxy so the
  * store phone lockdown (admin.openboxindustries.com only) can still look up UPCs.
+ * Floor cloud itself uses `/api/sb` via resolveFloorSupabaseUrl in @floor/cloud.
  */
 export function floorFunctionUrl(name: string): string {
   const path = name.replace(/^\//, '').replace(/^\/?\.netlify\/functions\//, '');
