@@ -27,15 +27,49 @@ export function setFloorCloudAuthStorage(storage: AuthStorage | undefined): void
   client = null;
 }
 
+/** Admin portal host that can reach Floor cloud only through the same-origin proxy. */
+const FLOOR_ADMIN_HOST = /(^|\.)admin\.openboxindustries\.com$/i;
+
+/** Netlify rewrite path on the admin site → floor Supabase project. */
+export const FLOOR_SUPABASE_PROXY_PATH = "/api/sb";
+
+/**
+ * On admin.openboxindustries.com, talk to Floor cloud through `/api/sb` so store
+ * phones/PCs that allow only that origin (or whose Wi‑Fi blocks *.supabase.co)
+ * still reach auth, REST, and storage. Elsewhere use the bake-time URL.
+ */
+export function resolveFloorSupabaseUrl(baked: string): string {
+  if (!baked) return baked;
+  if (typeof location === "undefined") return baked;
+  try {
+    if (!FLOOR_ADMIN_HOST.test(location.hostname)) return baked;
+    return `${location.origin}${FLOOR_SUPABASE_PROXY_PATH}`;
+  } catch {
+    return baked;
+  }
+}
+
+function bakedSupabaseUrl(): string {
+  // Exact import.meta.env.VITE_* so Vite inlines the build-time URL.
+  let url = "";
+  try {
+    url = String(import.meta.env.VITE_SUPABASE_URL || "");
+  } catch {
+    /* node tests / non-vite */
+  }
+  if (!url) {
+    url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
+  }
+  return url;
+}
+
 export function floorCloud(): SupabaseClient {
   if (client) return client;
   // Vite only inlines the exact identifiers import.meta.env.VITE_*. Do not
   // optional-chain or index — this file lives outside apps/mobile, so define
   // in vite.config.ts is what actually bakes the Codemagic values in.
-  const url =
-    import.meta.env.VITE_SUPABASE_URL ||
-    process.env.VITE_SUPABASE_URL ||
-    process.env.SUPABASE_URL;
+  const baked = bakedSupabaseUrl();
+  const url = resolveFloorSupabaseUrl(baked);
   const anon =
     import.meta.env.VITE_SUPABASE_ANON_KEY ||
     process.env.VITE_SUPABASE_ANON_KEY ||
@@ -168,16 +202,7 @@ function skuFromText(text: string): string | null {
 }
 
 function bakedSupabaseHost(): string {
-  // Exact import.meta.env.VITE_* so Vite inlines the build-time URL.
-  let url = "";
-  try {
-    url = String(import.meta.env.VITE_SUPABASE_URL || "");
-  } catch {
-    /* node tests / non-vite */
-  }
-  if (!url) {
-    url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
-  }
+  const url = bakedSupabaseUrl();
   try {
     return url ? new URL(url).host : "";
   } catch {
@@ -271,7 +296,7 @@ export function authErrorMessage(err: unknown): string {
   if (isNetworkFailureText(text) || isNetworkAuthFailure(err)) {
     const host = bakedSupabaseHost();
     const where = host ? ` (${host})` : "";
-    return `Can't reach Floor cloud${where}. Check Wi‑Fi, confirm this register can reach Supabase, and rebuild the app if the cloud URL was wrong at build time.`;
+    return `Can't reach Floor cloud${where}. Try phone cellular or a hotspot, check Wi‑Fi, confirm this register can reach Supabase, and rebuild the app if the cloud URL was wrong at build time.`;
   }
   const display = asPlainText(err);
   return display && display !== "[object Object]" ? display : text;

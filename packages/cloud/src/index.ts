@@ -17,6 +17,8 @@ export {
   resetFloorCloud,
   authErrorMessage,
   isNetworkAuthFailure,
+  resolveFloorSupabaseUrl,
+  FLOOR_SUPABASE_PROXY_PATH,
   type AuthState,
   type StaffSession,
 } from "./client.ts";
