@@ -31,6 +31,8 @@ type Props = {
   onUrl: (path: string, url: string) => void;
   showUpload?: boolean;
   onUpload?: (file: File) => void;
+  showAddWeight?: boolean;
+  onAddWeight?: () => void;
   onPrint?: () => void;
   showPackaged?: boolean;
   onPackaged?: () => void;
@@ -48,7 +50,8 @@ type Props = {
 /** Compact card for a manually bundled shipment only. No checkboxes. */
 export function AppShipmentCard({
   shipment, client, photoMap, photoUrls, locations, money, channelName, trackingTail,
-  onOpen, onOpenShipment, onUrl, showUpload, onUpload, onPrint, showPackaged, onPackaged, packagedBusy,
+  onOpen, onOpenShipment, onUrl, showUpload, onUpload, showAddWeight, onAddWeight,
+  onPrint, showPackaged, onPackaged, packagedBusy,
   showMarkShipped, onMarkShipped, showUnbundle, onUnbundle, unbundleBusy,
   expanded, onToggleExpand, hideMoney = false,
 }: Props) {
@@ -68,8 +71,12 @@ export function AppShipmentCard({
   const locLine = loc ? `${loc.display} · ${loc.slot}`.toUpperCase() : '';
   const pkg = shipment.package;
   const showActions = Boolean(
-    (hasLabel(lead) && onPrint) || (showUpload && onUpload) || (showPackaged && onPackaged)
-    || (showMarkShipped && onMarkShipped) || (showUnbundle && onUnbundle),
+    (hasLabel(lead) && onPrint)
+    || (showAddWeight && onAddWeight)
+    || (showUpload && onUpload)
+    || (showPackaged && onPackaged)
+    || (showMarkShipped && onMarkShipped)
+    || (showUnbundle && onUnbundle),
   );
 
   return (
@@ -156,6 +163,11 @@ export function AppShipmentCard({
           )}
           {hasLabel(lead) && onPrint && (
             <button type="button" className="app-order-action-outline" onClick={onPrint}>Print</button>
+          )}
+          {showAddWeight && onAddWeight && (
+            <button type="button" className="app-order-action-outline" onClick={onAddWeight}>
+              Add weight
+            </button>
           )}
           {showUpload && onUpload && (
             <label className="app-order-action-outline app-order-upload-v2">
