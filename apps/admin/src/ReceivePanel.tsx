@@ -414,6 +414,9 @@ const SCRATCH = 'Defective/non-sellable';
 const SCRATCH_LEGACY = 'Scratch & dent';
 const isDefectiveCondition = (value: string) => value === SCRATCH || value === SCRATCH_LEGACY;
 const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [USED_GOOD, 'Used · Good'], [USED_FAIR, 'Used · Fair'], [SCRATCH, 'Defective/non-sellable']];
+/** Receive chips for clerks — Defective stays under Flags, not as a condition radio. */
+const RECEIVE_CONDITION_CHIPS: [string, string][] = [[NEW, 'New'], [OPEN, 'Open box'], [USED_GOOD, 'Used · Good'], [USED_FAIR, 'Used · Fair']];
+const isFloorReceiveCondition = (value: string) => RECEIVE_CONDITION_CHIPS.some(([v]) => v === value) || isDefectiveCondition(value);
 const HOLD_REASONS: [string, string][] = [
   ['damaged', 'Damaged'], ['needs_testing', 'Needs testing'], ['keep_in_store', 'Keep in store'], ['other', 'Other'],
 ];
@@ -1528,7 +1531,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     categoryId: ebayAspects.categoryId || '',
     fields: ebayAspects.fields,
     attributes: ebayAspects.attributes,
-    conditionAllowed: Boolean(form.condition) && (ebayAspects.allowedGrades || []).some(grade => grade.grade === form.condition || (isDefectiveCondition(form.condition) && grade.grade === 'For parts')),
+    conditionAllowed: Boolean(form.condition) && isFloorReceiveCondition(form.condition),
   });
   const formValid = liveMissing.length === 0 && (doNotList || channelMissing === 0);
 
@@ -2585,13 +2588,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           value={ebayAspects}
           onChange={next => {
             setEbayAspects(next);
-            const grades = next.allowedGrades || [];
-            const onlyGrade = grades.length === 1 ? grades[0].grade : '';
-            // Costco returns are USED_GOOD — do not auto-pick New / Brand New when that is the only allowed grade.
-            const autoNew = /^brand\s*new$/i.test(onlyGrade) || onlyGrade === NEW;
-            const stillAllowed = !form.condition || grades.length === 0 || grades.some(grade => grade.grade === form.condition) || isDefectiveCondition(form.condition);
-            if (!stillAllowed) update('condition', grades.length === 1 && !autoNew ? onlyGrade : '');
-            else if (grades.length === 1 && !form.condition && !autoNew) update('condition', onlyGrade);
+            // Floor chips (New / Open box / Used · Good / Used · Fair) are not eBay grade names —
+            // never clear a clerk's pick when the category's eBay allow-list refreshes.
             const modelGuess = next.attributes.Model || next.attributes.Type || next.attributes['Model Number'] || '';
             if (modelGuess && !form.model.trim()) update('model', modelGuess);
           }}
@@ -2614,13 +2612,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         <div className={invalid('condition') ? 'receive-v2-invalid' : undefined}>
           <span className="receive-v2-label">Condition{!doNotList && <span className="receive-v2-req"> *</span>}</span>
-          {(ebayAspects.allowedGrades || []).length === 0
-            ? <p className="rcv-note">Pick a category first. eBay decides which conditions this category allows.</p>
-            : <div className="receive-chip-row" role="radiogroup" aria-label="Condition">
-              {(ebayAspects.allowedGrades || []).map(grade => (
-                <button type="button" key={grade.grade} className={`receive-chip${form.condition === grade.grade ? ' on' : ''}`} onClick={() => update('condition', grade.grade)}>{grade.grade}</button>
-              ))}
-            </div>}
+          <div className="receive-chip-row" role="radiogroup" aria-label="Condition">
+            {RECEIVE_CONDITION_CHIPS.map(([value, label]) => (
+              <button type="button" key={value} className={`receive-chip${form.condition === value ? ' on' : ''}`} onClick={() => update('condition', value)}>{label}</button>
+            ))}
+          </div>
           {ebayAspects.conditionNote ? <p className="rcv-note">{ebayAspects.conditionNote}</p> : null}
         </div>
         <ReceiveQuantity value={form.quantity} onChange={value => update('quantity', value)} disabled={busy} />

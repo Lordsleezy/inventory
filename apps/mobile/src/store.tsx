@@ -91,7 +91,7 @@ async function settingsFromCloud(session: StaffSession): Promise<Partial<Setting
     taxRateBps: num("taxRateBps", 0),
     currency: String(map.get("currency") ?? "USD").replace(/"/g, ""),
     categories: readList("categories", ["Uncategorized"]),
-    conditions: readList("conditions", ["New", "Open box", "Excellent", "Good", "Fair", "For parts"]),
+    conditions: readList("conditions", ["New", "Open box", "Used - Good", "Used - Fair", "For parts"]),
     testStatuses: readList("testStatuses", ["untested", "passed", "failed", "partial"]),
     locations: readList("locations", ["Floor", "Back room", "Repair bench"]),
     channels: readList("channels", ["floor", "ebay", "facebook", "offerup", "amazon", "tiktok", "website"]),

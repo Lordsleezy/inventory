@@ -32,12 +32,14 @@ test("appliance categories map Floor grades onto New / Open box / Used / For par
   assert.equal(mapFloorCondition("Excellent", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("Very good", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("Good", APPLIANCE).conditionId, "3000");
+  assert.equal(mapFloorCondition("Used - Good", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("Fair", APPLIANCE).conditionId, "3000");
+  assert.equal(mapFloorCondition("Used - Fair", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("For parts", APPLIANCE).conditionId, "7000");
 });
 
 test("used and defective Floor grades never map to New, Open box, or Refurbished", () => {
-  for (const grade of ["Excellent", "Very good", "Good", "Fair", "For parts"]) {
+  for (const grade of ["Excellent", "Very good", "Good", "Used - Good", "Fair", "Used - Fair", "For parts"]) {
     const mapped = mapFloorCondition(grade, ELECTRONICS);
     assert.ok(mapped);
     assert.notEqual(mapped.conditionId, "1000");
@@ -46,6 +48,7 @@ test("used and defective Floor grades never map to New, Open box, or Refurbished
   }
   assert.equal(mapFloorCondition("For parts", ELECTRONICS).conditionId, "7000");
   assert.equal(mapFloorCondition("Excellent", ELECTRONICS).name, "Used");
+  assert.equal(mapFloorCondition("Used - Good", ELECTRONICS).name, "Used");
 });
 
 test("For parts is unmapped when the category has no parts condition", () => {
@@ -75,8 +78,10 @@ test("listing payload sends USED_EXCELLENT for appliance Used (ID 3000), never t
 test("grade map reports closest Used for mid grades on appliances", () => {
   const rows = gradeMapForCategory(APPLIANCE);
   assert.equal(rows.find((r) => r.floor === "Open box").ebayName, "Open box");
-  assert.equal(rows.find((r) => r.floor === "Fair").ebayName, "Used");
+  assert.equal(rows.find((r) => r.floor === "Used - Fair").ebayName, "Used");
+  assert.equal(rows.find((r) => r.floor === "Used - Good").ebayName, "Used");
   assert.equal(rows.every((r) => !r.unmapped), true);
+  assert.equal(rows.some((r) => r.floor === "Excellent"), false);
 });
 
 test("trading cards send Ungraded plus the Floor grade's card condition", () => {

@@ -1,12 +1,11 @@
 /** Floor grades stay as Floor wrote them. eBay IDs are per category. */
 
+/** Sellable Floor grades shown on Receive. Legacy Excellent / Very good / Good / Fair still map. */
 export const FLOOR_CONDITION_GRADES = [
   "New",
   "Open box",
-  "Excellent",
-  "Very good",
-  "Good",
-  "Fair",
+  "Used - Good",
+  "Used - Fair",
   "For parts",
 ];
 
@@ -100,7 +99,7 @@ export function mapFloorCondition(floorGrade, allowed) {
       null
     );
   }
-  if (grade === "good") {
+  if (grade === "good" || grade === "used good" || (grade.includes("used") && grade.includes("good") && !grade.includes("very"))) {
     return (
       byName(usedPool, (n) => n === "good" || n === "used good" || n === "used") ||
       byId(usedPool, new Set(["5000", "3000"])) ||

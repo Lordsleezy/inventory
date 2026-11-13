@@ -46,10 +46,16 @@ async function suggestionsFor(title) {
 
 async function conditionChoices(categoryId, leafName) {
   const live = await refreshCategoryConditions(categoryId);
+  // Always return Floor grades (incl. Open box) so Receive chips stay stable even when
+  // the eBay category has no matching condition id yet.
   const grades = FLOOR_CONDITION_GRADES.map((grade) => {
     const mapped = mapFloorCondition(grade, live);
-    return mapped ? { grade, conditionId: String(mapped.conditionId), ebayName: mapped.name } : null;
-  }).filter(Boolean);
+    return {
+      grade,
+      conditionId: mapped ? String(mapped.conditionId) : "",
+      ebayName: mapped?.name || "",
+    };
+  });
   const onlyNew = grades.length === 1 && grades[0].grade === "New";
   return {
     conditions: grades,
