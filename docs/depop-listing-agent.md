@@ -8,4 +8,6 @@ This RPC records existing publications only. It does not publish to Depop. Agent
 
 The signed-in portal form remains admin-only. Clerks and anonymous clients cannot execute the service-only confirmation function. Recording a Depop sale keeps the canonical listing row and marks it needs removal until an admin presses Remove. A stocked item with quantity left stays a normal live row. Deleting or voiding a sale clears that flag and never republishes a row that was already removed.
 
+The admin Depop count is one row per live shop URL once `depop_shop_snapshot` has a row for the store. A second URL for the same SKU is its own row. A live post with no Floor SKU still shows. Canonical `listings` stays one row per SKU. Removing one URL leaves the SKU listed while another URL remains; removing the last URL delists it.
+
 Confirmed Depop rows are protected from generic legacy imports. Use `floor_depop_remove_listing(p_store,p_sku,p_actor)` to record an actual shop removal; the portal Remove action remains available to admins. Never rewrite the tracker from a stale export. All other channel rows remain independent.
