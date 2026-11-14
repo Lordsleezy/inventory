@@ -106,8 +106,13 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
         await el.play();
         const videoTrack = stream.getVideoTracks()[0];
         track.current = videoTrack || null;
-        const caps = videoTrack?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
-        if (caps?.torch) setTorchOk(true);
+        try {
+          const caps = videoTrack?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+          // iPhone Safari has no torch API — Light stays hidden. Moto/Chrome expose caps.torch.
+          setTorchOk(Boolean(caps?.torch));
+        } catch {
+          setTorchOk(false);
+        }
         const scan = async () => {
           if (stopped || lifecycle.stopped || photoMode.current) return;
           frame = window.requestAnimationFrame(() => void scan());
@@ -151,12 +156,22 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
 
   async function toggleTorch() {
     const videoTrack = track.current;
-    if (!videoTrack) return;
+    if (!videoTrack || !torchOk) return;
     const next = !torchOn;
     try {
       await videoTrack.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
       setTorchOn(next);
-    } catch { setTorchOk(false); }
+    } catch {
+      // iPhone / browsers without a torch — hide Light instead of leaving a dead button.
+      setTorchOn(false);
+      setTorchOk(false);
+    }
+  }
+
+  /** Always dismiss: lifecycle.stop() is a no-op when the camera already halted (iOS visibility blip). */
+  function dismissScanner() {
+    stopCamera.current?.(true);
+    close.current();
   }
 
   function takePhoto() {
@@ -188,8 +203,10 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
         {mode === 'photo' ? <span className="receive-scanner-caption">Take picture of item for identification</span> : <span className="receive-scanner-line" />}
       </div>
       <div className="receive-scanner-bar">
-        <button type="button" onClick={() => stopCamera.current?.(true)}>Close</button>
-        {torchOk && <button type="button" onClick={() => void toggleTorch()}>{torchOn ? 'Light off' : 'Light'}</button>}
+        <button type="button" onClick={dismissScanner}>Close</button>
+        {torchOk ? (
+          <button type="button" onClick={() => void toggleTorch()}>{torchOn ? 'Light off' : 'Light'}</button>
+        ) : null}
         {mode === 'photo' && <button type="button" onClick={takePhoto}>OK</button>}
       </div>
       {banner}
