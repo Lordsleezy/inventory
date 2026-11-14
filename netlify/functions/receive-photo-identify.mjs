@@ -535,7 +535,7 @@ export async function invoke(event) {
       await floorLog({ level: "warn", event: "receive_photo.manifest_pick_failed", message: String(error?.message || error).slice(0, 200), storeId: ctx.storeId });
     }
     if (!item) return json(200, { ok: true, card: null, identity: { brand, title, model } });
-    const card = await costcoReceiveLookup(ctx.sb, ctx.storeId, item, { stripMoney: ctx.isAdmin !== true });
+    const card = await costcoReceiveLookup(ctx.sb, ctx.storeId, item, { stripMoney: false });
     if (!card?.merged?.title) return json(200, { ok: true, card: null, identity: { brand, title, model } });
     card.receive = { ...(card.receive || {}), suggested: true, scanned_code: upc || null };
     await floorLog({ level: "info", event: "receive_photo.manifest_pick", message: item, storeId: ctx.storeId, detail: { upc, title } });

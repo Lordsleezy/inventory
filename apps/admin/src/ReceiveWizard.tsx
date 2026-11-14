@@ -147,7 +147,10 @@ export function ReceiveWizard({
     else setLocation('');
   }
 
-  const retail = retailCents != null ? `$${(retailCents / 100).toFixed(2)}` : '';
+  const manifestRetailCents = retailCents ?? manifestReference?.reference?.retail_cents ?? null;
+  const retail = manifestRetailCents != null
+    ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(manifestRetailCents / 100)
+    : '';
   const nav = (
     <div className="receive-step-nav">
       <button type="button" onClick={() => go(-1)}>Back</button>
@@ -269,7 +272,7 @@ export function ReceiveWizard({
       {step === 'price' && (
         <div className="receive-step">
           <h2>Your price <span className="receive-step-req">*</span></h2>
-          {retail && <p>Manifest retail {retail}</p>}
+          {retail && <p className="manifest-receive-reference"><strong>Manifest retail: {retail}</strong></p>}
           <input inputMode="decimal" value={form.ask} placeholder="0.00" onChange={event => update('ask', event.target.value)} />
           <label>Quantity<input inputMode="numeric" value={form.quantity} onChange={event => update('quantity', event.target.value)} /></label>
           {stockMatches[0] && <p>You already have {stockMatches[0].quantity} in stock.</p>}

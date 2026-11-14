@@ -21,7 +21,7 @@ async function actions(event, ctx) {
     const upc = String(body.upc ?? "").trim();
     if (!upc) return json(400, { ok: false, error: "upc_required" });
     try {
-      const prewarmed = await costcoReceiveLookup(ctx.sb, ctx.storeId, upc, { stripMoney: ctx.isAdmin !== true });
+      const prewarmed = await costcoReceiveLookup(ctx.sb, ctx.storeId, upc, { stripMoney: false });
       if (prewarmed) return json(200, prewarmed);
       const result = await lookupUpc(ctx.storeId, upc, {
         force: body.force === true,
@@ -47,7 +47,7 @@ async function actions(event, ctx) {
         code: body.upc,
         title: body.title,
         itemNumber: body.item_number,
-      }, { stripMoney: ctx.isAdmin !== true });
+      }, { stripMoney: false });
       return json(200, card);
     } catch (err) {
       return json(err.status || 500, { ok: false, error: err.message || "pin_failed" });
