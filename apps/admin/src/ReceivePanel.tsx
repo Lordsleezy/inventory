@@ -1,6 +1,7 @@
 import { ReceiveQuantity } from './ReceiveQuantity';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
 import { ReceiveBarcodeScanner } from './ReceiveBarcodeScanner';
+import { ReceiveWizard } from './ReceiveWizard';
 import { commitReceive } from './receiveCommit';
 import { isDnsType } from './dns';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FocusEvent, type RefObject } from 'react';
@@ -251,6 +252,9 @@ type Lookup = {
     photo?: boolean;
     internal?: boolean;
     ebay_category_id?: string | null;
+    manifest_id?: string | null;
+    lot_id?: string | null;
+    review?: boolean;
   };
 };
 
@@ -1255,7 +1259,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         .map(key => [key, m?.aspects?.[key] ? (r?.floor_product ? 'Floor' : 'Amazon') : '']),
     ].filter(([, source]) => source)));
     setForm(initial);
-    setEbayAspects({ categoryId: null, path: null, fields: [], attributes: {}, na: {} });
+    if (!staffMode && r?.receive?.manifest_id) setManifestId(String(r.receive.manifest_id));
+    const ebayCategory = String(r?.receive?.ebay_category_id || '');
+    setEbayAspects(/^\d+$/.test(ebayCategory)
+      ? { categoryId: ebayCategory, path: text(m?.category) || null, fields: [], attributes: {}, na: {} }
+      : { categoryId: null, path: null, fields: [], attributes: {}, na: {} });
     const miss = current.status === 'ready' || current.status === 'error'
       ? (current.status === 'error' ? null : catalogMissMessage(r))
       : null;
@@ -1286,7 +1294,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       try { return sessionStorage.getItem(`floor:receive-photo-dismissed:${storeId}:${current.upc}`) === '1'; }
       catch { return false; }
     })();
-    if (!picking && !prewarmed && (isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id && !photoDismissed) {
+    if (!appChrome && !picking && !prewarmed && (isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id && !photoDismissed) {
       missPromptedFor.current = current.id;
       setPhotoNeed(r?.store_label ? storeLabelWarning()
         : isTrueCatalogMiss(r) ? "Can't find this item — take a photo"
@@ -1467,7 +1475,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const formValid = liveMissing.length === 0 && (doNotList || channelMissing === 0);
 
   /* ----- finish ----- */
-  async function finish(event?: React.FormEvent) {
+  async function finish(event?: React.FormEvent, ackDup = false) {
     saveTappedAt.current = performance.now();
     event?.preventDefault();
     setError(''); setWarning(''); setSaved([]);
@@ -1505,7 +1513,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setError(`Still needed: ${names.join(', ')}.`);
       return;
     }
-    if (!doNotList && !dupAck && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
+    if (!doNotList && !dupAck && !ackDup && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
     if (doNotList) setWarning('Saving without listing — hidden from the website and marketplaces.');
     await receive(parsed, null, acceptedStockPhotoPath);
   }
@@ -1664,6 +1672,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       if (e) throw e;
       receiveRequest.current = crypto.randomUUID();
       setSaved([match.sku]); setSelectedStockMatch(null); setStockMatches([]); setLast(null);
+      resetEntry(undefined, false);
       setForm(prev => ({ ...prev, quantity: '1' }));
       onSaved();
     } catch (e) { setError(errText(e)); }
@@ -2122,6 +2131,42 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const invalid = (key: ReceiveFieldKey) => showSaveValidation && liveMissing.includes(
     key === 'ebay_category' ? 'category' : key === 'ebay_aspects' ? 'item specifics' : key === 'upc' ? 'UPC' : key,
   );
+  if (appChrome && !manual) {
+    const foundTitle = text(result?.merged?.title);
+    const foundBrand = text(result?.merged?.brand);
+    const lot = text(result?.receive?.lot_id);
+    return <section className="panel receive-panel receive-v2 receive-app receive-steps-host">
+      <ReceiveWizard
+        client={client} storeId={storeId} accessToken={accessToken} staffMode={staffMode}
+        lookupId={current?.id || null} lookupStatus={current?.status || null}
+        miss={isTrueCatalogMiss(result)} title={foundTitle} brand={foundBrand}
+        details={[result?.receive?.item_number, text(result?.merged?.category)].filter(Boolean).join(' · ')}
+        source={result?.receive?.item_number ? `Found by UPC · manifest ${lot || 'TRA-7096264'}` : 'Found by UPC'}
+        stockUrl={stockPhotoUrls[0]?.url || ''}
+        retailCents={result?.receive?.manifest_retail_cents ?? null}
+        form={form}
+        update={(key, value) => setForm(prev => ({ ...prev, [key]: value }))}
+        doNotList={doNotList} setDoNotList={setDoNotList}
+        hasPhoto={files.length > 0 || stagedPhotoPaths.length > 0}
+        onPhoto={file => { const list = new DataTransfer(); list.items.add(file); void ingestFiles(list.files); }}
+        onIdentify={file => identifyMissPhoto(file)}
+        locations={receiveLocations} location={selectedLocation} setLocation={setSelectedLocation}
+        stockMatches={stockMatches}
+        onAddToStock={sku => { const match = stockMatches.find(item => item.sku === sku); if (match) void addToExistingStock(match); }}
+        addingToStock={busy}
+        ebayAspects={ebayAspects} setEbayAspects={setEbayAspects}
+        needsSpecifics={missingEbayAspects(ebayAspects.fields, ebayAspects.attributes, ebayAspects.na).length > 0}
+        busy={busy} error={error || photoIdError}
+        onSave={() => { void finish(undefined, true); }}
+        onCancel={() => onAppCancel?.()}
+        onClear={() => { setQueue([]); setPhotoCandidate(null); setFiles([]); setError(''); }}
+        onScan={code => { setError(''); enqueue(code); }}
+        onReject={() => { setPhotoCandidate(null); setPhotoVerifyPending(false); }}
+        onAccept={async () => { if (photoCandidate) await choosePhotoIdentity(true); }}
+      />
+    </section>;
+  }
+
   return <section className={`panel receive-panel receive-v2${appChrome ? ' receive-app' : ''}`}>
     {(appChrome || storePhoneMode) && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
       {typingOpen ? 'Hide Floor keyboard' : '⌨ Floor keyboard'}

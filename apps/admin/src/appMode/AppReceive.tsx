@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { displayProductTitle } from '@floor/store';
-import { CaptureFileButton, decodeBarcodeFile, ReceivePanel } from '../ReceivePanel';
+import { ReceivePanel } from '../ReceivePanel';
 import { BundleReceive } from '../BundleReceive';
 import { AppItemDetail } from './AppItemDetail';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
@@ -20,7 +20,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   // Scope this layout to the store phone: an installed Android PWA signed in as
   // an active clerk. iPhone and desktop/admin Receive keep their current UI.
   const storePhoneMode = staffMode && isAndroid() && isStandaloneApp();
-  const [phase, setPhase] = useState<'home' | 'form' | 'bundle'>('home');
+  const [phase, setPhase] = useState<'home' | 'form' | 'bundle'>('form');
   useEffect(() => {
     if (phase !== 'home') return;
     const raw = sessionStorage.getItem('floor:last-receive-timing');
@@ -33,12 +33,10 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   }, [phase]);
   const [manual, setManual] = useState(false);
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
-  const [cameraError, setCameraError] = useState('');
   const [nextSku, setNextSku] = useState<string | null>(null);
   const [today, setToday] = useState<{ sku: string; title: string; location: string; at: string }[]>([]);
   const scanRef = useRef<HTMLInputElement>(null);
   const [editSku, setEditSku] = useState<string | null>(null);
-  const homeCamera = useRef<HTMLInputElement>(null);
 
   function openForm(asManual: boolean) {
     setManual(asManual);
@@ -89,7 +87,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
           onSaved={() => {
             onSaved();
             setPendingUpc(null);
-            setPhase('home');
+            setManual(false);
           }}
           appChrome
           initialManual={manual}
@@ -129,28 +127,10 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
 
       <div className="rcv-home-actions">
         {/* Input must receive the tap itself — programmatic .click() is blocked on iOS PWA. */}
-        <CaptureFileButton
-          inputRef={homeCamera}
-          capture
-          label="Use camera"
-          onFiles={async (files) => {
-            const file = files?.[0];
-            if (!file) return;
-            setCameraError('');
-            const code = await decodeBarcodeFile(file);
-            if (code) {
-              setPendingUpc(code);
-              openForm(false);
-            } else {
-              setCameraError('Couldn’t read a barcode from that photo. Try again or type the digits.');
-              openForm(false);
-            }
-          }}
-        />
+        <button type="button" onClick={() => openForm(false)}>Scan</button>
         <button type="button" className="secondary" onClick={() => openForm(true)}>No barcode</button>
       </div>
       {!staffMode && <button type="button" className="text-button rcv-bundle" onClick={() => setPhase('bundle')}>Bundle items</button>}
-      {cameraError && <p className="app-inline-error">{cameraError}</p>}
       <ReceiveWorkStatus client={client} accessToken={accessToken} />
 
       <p className="app-section-label">Received today</p>

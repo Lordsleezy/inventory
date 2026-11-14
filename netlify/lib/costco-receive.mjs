@@ -179,6 +179,8 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
     receive: {
       bucket: decision.bucket,
       item_number: decision.item,
+      manifest_id: line?.manifest_id || null,
+      lot_id: line?.lot_id || null,
       pack_count: pack,
       condition_hint: "",
       review: decision.review,

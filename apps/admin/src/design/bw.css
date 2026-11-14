@@ -487,9 +487,21 @@ html.app-mode .receive-panel.receive-v2 .rcv-status {
   white-space: nowrap !important;
 }
 html.app-mode .receive-panel.receive-v2 .receive-v2-pin {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  position: static !important;
+  display: block;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  z-index: auto;
+}
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button,
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save,
+html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.rcv-scan-next {
+  border-radius: 0 !important;
+  border: 1px solid #fff !important;
+  background: #000 !important;
+  color: #fff !important;
+  box-shadow: none !important;
 }
 html.app-mode .receive-panel.receive-v2 .rcv-needed { grid-column: 1 / -1; margin: 0; }
 html.app-mode .receive-panel.receive-v2 .receive-v2-pin button.receive-v2-save,

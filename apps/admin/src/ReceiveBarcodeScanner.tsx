@@ -37,10 +37,17 @@ function beep() {
   navigator.vibrate?.(60);
 }
 
-export function ReceiveBarcodeScanner({ onDetect, onClose }: { onDetect: (code: string) => void; onClose: () => void }) {
+export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onPhoto }: {
+  onDetect: (code: string) => void;
+  onClose: () => void;
+  mode?: 'barcode' | 'photo';
+  onPhoto?: (file: File) => void;
+}) {
   const video = useRef<HTMLVideoElement>(null);
   const detect = useRef(onDetect);
   detect.current = onDetect;
+  const photoMode = useRef(mode === 'photo');
+  photoMode.current = mode === 'photo';
   const [err, setErr] = useState('');
   const [typed, setTyped] = useState('');
   const [torchOn, setTorchOn] = useState(false);
@@ -83,7 +90,7 @@ export function ReceiveBarcodeScanner({ onDetect, onClose }: { onDetect: (code: 
         const caps = videoTrack?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
         if (caps?.torch) setTorchOk(true);
         const scan = async () => {
-          if (stopped || lifecycle.stopped) return;
+          if (stopped || lifecycle.stopped || photoMode.current) return;
           frame = window.requestAnimationFrame(() => void scan());
           if (busy || !el.videoWidth || !ctx) return;
           busy = true;
@@ -129,6 +136,19 @@ export function ReceiveBarcodeScanner({ onDetect, onClose }: { onDetect: (code: 
     } catch { setTorchOk(false); }
   }
 
+  function takePhoto() {
+    const el = video.current;
+    if (!el?.videoWidth) { setErr('Camera is not ready yet.'); return; }
+    const shot = document.createElement('canvas');
+    shot.width = el.videoWidth;
+    shot.height = el.videoHeight;
+    shot.getContext('2d')?.drawImage(el, 0, 0);
+    shot.toBlob(blob => {
+      if (!blob) { setErr('Could not take the photo.'); return; }
+      onPhoto?.(new File([blob], 'item.jpg', { type: 'image/jpeg' }));
+    }, 'image/jpeg', 0.92);
+  }
+
   function submitTyped() {
     const code = acceptedBarcode(typed);
     if (!code) { setErr('That is not a valid UPC or EAN.'); return; }
@@ -140,16 +160,19 @@ export function ReceiveBarcodeScanner({ onDetect, onClose }: { onDetect: (code: 
     <div className="receive-scanner" role="dialog" aria-modal="true" aria-label="Scan barcode">
       <video ref={video} playsInline muted autoPlay />
       <div className="receive-scanner-shade" />
-      <div className="receive-scanner-frame" aria-hidden="true"><span className="receive-scanner-line" /></div>
+      <div className="receive-scanner-frame" aria-hidden="true">
+        {mode === 'photo' ? <span className="receive-scanner-caption">Take picture of item for identification</span> : <span className="receive-scanner-line" />}
+      </div>
       <div className="receive-scanner-bar">
         <button type="button" onClick={onClose}>Close</button>
         {torchOk && <button type="button" onClick={() => void toggleTorch()}>{torchOn ? 'Light off' : 'Light'}</button>}
+        {mode === 'photo' && <button type="button" onClick={takePhoto}>OK</button>}
       </div>
       {err && <p className="receive-scanner-error" role="alert">{err}</p>}
-      <form className="receive-scanner-type" onSubmit={event => { event.preventDefault(); submitTyped(); }}>
+      {mode === 'barcode' && <form className="receive-scanner-type" onSubmit={event => { event.preventDefault(); submitTyped(); }}>
         <label>Type UPC<input inputMode="numeric" autoComplete="off" value={typed} onChange={event => setTyped(event.target.value)} /></label>
         <button type="submit">Look up</button>
-      </form>
+      </form>}
     </div>,
     document.body,
   );
