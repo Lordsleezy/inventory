@@ -328,7 +328,9 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   }
 
   async function verifyOrderWeight(o: WebOrder, weightLb: number, confirmed = false) {
-    await runAction('weight', async () => {
+    setBusy('weight');
+    setError('');
+    try {
       const { error: e } = await client.rpc('portal_verify_order_weight', {
         p_order: o.id, p_weight_lb: weightLb, p_confirmed: confirmed,
       });
@@ -337,7 +339,21 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
           ? 'Enter a weight greater than 0 and under 200 lb.'
           : e.message);
       }
-    });
+      const seller = String(o.ebay_seller_username || '').toLowerCase();
+      if ((o.channel || '').toLowerCase() === 'ebay' && seller === 'ikonikdeals2026') {
+        try {
+          await orderAdmin(accessToken, { action: 'sync_ebay_weight', id: o.id });
+        } catch (syncErr) {
+          // Weight is saved in Floor; keep the eBay error visible before print.
+          setError(syncErr instanceof Error ? syncErr.message : String(syncErr));
+        }
+      }
+    } catch (e) {
+      setError(shortError(errText(e)));
+    } finally {
+      setBusy('');
+      await load();
+    }
   }
 
   async function markShipmentPackaged(shipment: ShipmentView) {

@@ -72,6 +72,10 @@ export type WebOrder = {
   weight_verified_by_name?: string | null;
   weight_on_file_lb?: number | null;
   weight_verified_lb?: number | null;
+  ebay_weight_synced_at?: string | null;
+  ebay_weight_sync_ok?: boolean | null;
+  ebay_weight_sync_error?: string | null;
+  ebay_weight_sync_via?: string | null;
   match_status?: string | null;
   marketplace_title?: string | null;
   marketplace_fee_cents?: number | null;
@@ -242,6 +246,14 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
         delete next[o.id];
         return next;
       });
+      const seller = String(o.ebay_seller_username || '').toLowerCase();
+      if ((o.channel || '').toLowerCase() === 'ebay' && seller === 'ikonikdeals2026') {
+        try {
+          await orderAdmin(accessToken, { action: 'sync_ebay_weight', id: o.id });
+        } catch (syncErr) {
+          setError(syncErr instanceof Error ? syncErr.message : String(syncErr));
+        }
+      }
       await load();
     }
     setBusy(null);
@@ -787,6 +799,12 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
             Verified weight {o.weight_verified_lb} lb
             {changed && o.weight_on_file_lb != null && (
               <> · was <span className="bad-text">{o.weight_on_file_lb} lb</span></>
+            )}
+            {(o.channel || '').toLowerCase() === 'ebay' && o.ebay_weight_synced_at && o.ebay_weight_sync_ok && (
+              <> · <span className="ok-text">Weight sent to eBay ✓</span></>
+            )}
+            {(o.channel || '').toLowerCase() === 'ebay' && o.ebay_weight_synced_at && o.ebay_weight_sync_ok === false && (
+              <> · <span className="bad-text">{o.ebay_weight_sync_error || 'eBay weight sync failed'}</span></>
             )}
           </p>
         )}

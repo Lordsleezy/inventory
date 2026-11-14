@@ -563,6 +563,39 @@ export async function getTradingItem(token, itemId) {
   return parseTradingItem(xml);
 }
 
+/** Read calculated-shipping package L×W×H + weight from a listing (works on ended items too). */
+export async function getItemShippingPackage(token, itemId, account) {
+  const id = String(itemId || "").trim();
+  if (!/^\d+$/.test(id)) throw new Error("package read needs a numeric item id");
+  const xml = await tradingCall(
+    token,
+    "GetItem",
+    `<ItemID>${xmlEsc(id)}</ItemID>
+<OutputSelector>Item.ItemID</OutputSelector>
+<OutputSelector>Item.SellingStatus</OutputSelector>
+<OutputSelector>Item.ShippingDetails</OutputSelector>
+<OutputSelector>Item.ShippingPackageDetails</OutputSelector>`,
+    account,
+  );
+  const listingStatus = xmlTag(xmlBlocks(xml, "SellingStatus")[0] || "", "ListingStatus") || "";
+  const blocks = [
+    ...xmlBlocks(xml, "ShippingPackageDetails"),
+    ...xmlBlocks(xml, "CalculatedShippingRate"),
+  ];
+  let box = null;
+  for (const block of blocks) {
+    const lengthIn = Number(xmlTag(block, "PackageLength") || 0);
+    const widthIn = Number(xmlTag(block, "PackageWidth") || 0);
+    const heightIn = Number(xmlTag(block, "PackageDepth") || 0);
+    const weightLb = Number(xmlTag(block, "WeightMajor") || 0) + Number(xmlTag(block, "WeightMinor") || 0) / 16;
+    if (lengthIn > 0 && widthIn > 0 && heightIn > 0) {
+      box = { lengthIn, widthIn, heightIn, weightLb: weightLb > 0 ? weightLb : null };
+      break;
+    }
+  }
+  return { itemId: id, listingStatus, box };
+}
+
 /** In-place revise of condition, description, and pictures only. */
 export async function reviseFixedPriceStandards(token, change, account) {
   const { reviseStandardsXml } = await import("./ebay-listing-standards.mjs");

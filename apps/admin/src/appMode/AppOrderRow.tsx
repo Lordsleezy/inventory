@@ -96,6 +96,15 @@ export function AppOrderRow({
             {problem && (
               <span className="app-order-problem">{problemText}</span>
             )}
+            {!needsWeight && order.weight_verified_lb != null && (
+              <span className="app-order-meta">Verified {order.weight_verified_lb} lb</span>
+            )}
+            {!needsWeight && (order.channel || '').toLowerCase() === 'ebay' && order.ebay_weight_synced_at && order.ebay_weight_sync_ok && (
+              <span className="app-order-meta ok-text">Weight sent to eBay ✓</span>
+            )}
+            {!needsWeight && (order.channel || '').toLowerCase() === 'ebay' && order.ebay_weight_synced_at && order.ebay_weight_sync_ok === false && (
+              <span className="app-order-meta bad-text">{order.ebay_weight_sync_error || 'eBay weight sync failed'}</span>
+            )}
           </span>
         </button>
       </div>
