@@ -43,4 +43,5 @@ test("lookup keys cover leading-zero forms and a padded Costco item label", () =
   assert.ok(ordinary.includes("041333051543"));
   assert.equal(ordinary.includes("1806358"), false);
   assert.deepEqual(barcodeLookupKeys("499995988934"), ["499995988934"]);
+  assert.ok(barcodeLookupKeys("0491234567890").includes("491234567890"));
 });

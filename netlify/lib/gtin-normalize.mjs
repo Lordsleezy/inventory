@@ -94,6 +94,11 @@ export function barcodeLookupKeys(raw) {
     if (upcA && !gtinIssue(upcA)) add(upcA);
   }
 
+  // Same strips the manifest column uses, even when the check digit is not a retail GTIN.
+  if (d.length === 14 && d.startsWith("00")) add(d.slice(2));
+  if (d.length === 13 && d.startsWith("0")) add(d.slice(1));
+  if (d.length === 12 && d.startsWith("0")) add(d.slice(1));
+
   let code = d;
   if (code.length === 11) {
     const padded = `0${code}`;

@@ -42,6 +42,9 @@ begin
   if d = '' then return keys; end if;
   keys := array[d];
   if d ~ '^4999' then return keys; end if;
+  if length(d) = 14 and left(d, 2) = '00' then keys := keys || substr(d, 3); end if;
+  if length(d) = 13 and left(d, 1) = '0' then keys := keys || substr(d, 2); end if;
+  if length(d) = 12 and left(d, 1) = '0' then keys := keys || substr(d, 2); end if;
   code := d;
   if length(code) = 11 and public.gtin_check_ok('0' || code) then
     code := '0' || code;
