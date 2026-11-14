@@ -37,7 +37,7 @@ select ok(
 
 select lives_ok(
   $$select public.receive_require_ebay_leaf('{"do_not_list":"true"}'::jsonb)$$,
-  'do not list skips the eBay gate');
+  'do not list still saves');
 
 select lives_ok(
   $$select public.receive_require_ebay_leaf('{}'::jsonb)$$,

@@ -23,20 +23,17 @@ export type ReceiveStepId =
   | 'location'
   | 'review';
 
-/** Screens after a confirmed identity. Photo, condition, and location always. Listing screens only when still empty, and never after Do not list. */
+/** Screens after a confirmed identity. Photo, condition, and location always. Listing screens only when still empty, and never after Do not list. eBay category and item specifics are filled in the background and never get a screen. */
 export function receiveStepPlan(input: {
   doNotList: boolean;
   brand: string;
   title: string;
-  hasCategory: boolean;
-  needsSpecifics: boolean;
   hasDims: boolean;
   hasStockMatch: boolean;
 }): ReceiveStepId[] {
   const steps: ReceiveStepId[] = ['confirm', 'photo'];
   if (!input.brand.trim()) steps.push('brand');
   if (!input.doNotList && !input.title.trim()) steps.push('title');
-  if (!input.doNotList && (!input.hasCategory || input.needsSpecifics)) steps.push('category');
   steps.push('condition');
   if (!input.doNotList) {
     steps.push('price');

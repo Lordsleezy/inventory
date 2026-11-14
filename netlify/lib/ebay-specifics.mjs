@@ -13,9 +13,20 @@ const text = (value) => String(value ?? "").trim();
 
 /**
  * After Brand/Model/UPC seeds, fill every still-blank required/recommended aspect from
- * title / brand / model / category path. If nothing matches a selection-only list, pick
- * the first allowed value so Receive never blocks on an empty Type (clerk can edit later).
+ * title / brand / model / category path. Leave a required aspect blank when nothing
+ * in the title or catalog matches. Receive does not block on the blank.
  */
+function confidentFreeType(title, brand, leaf) {
+  const brandWords = new Set(text(brand).toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 3));
+  const words = text(title).split(/[^A-Za-z0-9]+/).filter((word) => word.length >= 4 && !brandWords.has(word.toLowerCase()));
+  const leafWords = text(leaf).toLowerCase().split(/[^a-z0-9]+/).filter((word) => word.length >= 4);
+  const hits = words.filter((word) => {
+    const stem = word.toLowerCase().replace(/s$/, "");
+    return leafWords.some((part) => part.replace(/s$/, "") === stem);
+  });
+  return hits.length === 1 ? hits[0] : "";
+}
+
 export function guessReceiveAspects(fields = [], attributes = {}, identity = {}, path = "") {
   const leaf = text(path).split(">").pop()?.trim() || "";
   const title = text(identity.title);
@@ -37,6 +48,8 @@ export function guessReceiveAspects(fields = [], attributes = {}, identity = {},
         confidentPhrase(allowed, sources) ||
         matchAllowedFromText(def, ...sources) ||
         "";
+    } else if (lower === "type") {
+      value = confidentFreeType(title, brand, leaf);
     } else if (allowed.length) {
       value = matchAllowedFromText(def, ...sources) || confidentPhrase(allowed, sources) || "";
     } else if (lower === "brand" && brand) {
@@ -44,14 +57,15 @@ export function guessReceiveAspects(fields = [], attributes = {}, identity = {},
     } else if ((lower === "model" || lower === "mpn" || lower === "manufacturer part number") && model) {
       value = model;
     }
-    // Last resort for list-only required aspects: any allowed value beats a blank that blocks save.
-    if (!value && def.required && allowed.length && (def.selectionOnly || def.selection_only)) {
-      value = allowed[0];
-    }
     if (!value) continue;
     const applied = fillMissing(next, { [name]: value }, fields);
     next = applied.attributes;
     if (applied.filled.includes(name)) guessed.push(name);
+  }
+  // Floor's brand is the eBay Brand specific, even when the category's list does not contain it.
+  if (brand && !text(next.Brand)) {
+    next = { ...next, Brand: brand };
+    guessed.push("Brand");
   }
   return { attributes: next, filled: guessed };
 }

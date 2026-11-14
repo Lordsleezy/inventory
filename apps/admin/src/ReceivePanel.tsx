@@ -19,12 +19,11 @@ import type { ManifestSearchLine } from './manifestReference';
 import { BundleReceive } from './BundleReceive';
 const MeasureOnMat = lazy(() => import('./MeasureOnMat').then(module => ({ default: module.MeasureOnMat })));
 import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specifics.mjs';
-import { ebayDetailsStatus } from '../../../shared/ebay-category-present.mjs';
 import { filterCategoryOptions, isMattressAccessory, matchReceiveCategory } from '../../../shared/receive-category.mjs';
-import { notForSaleBrandError, receiveMissingFields, missingEbayAspects, upcRequired, receiveFieldMessage, receiveSectionForGap, type ReceiveFieldKey } from './receive-validation';
+import { notForSaleBrandError, receiveMissingFields, upcRequired, receiveFieldMessage, receiveSectionForGap, type ReceiveFieldKey } from './receive-validation';
 import { withFloorBrandOnEbay } from './ebayBrandMap';
 import { ReceiveSection } from './ReceiveSection';
-import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCategoryAspects';
+import { type ReceiveAspectState } from './ReceiveCategoryAspects';
 import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import { isCompleteReceiveTitle, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
@@ -699,7 +698,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [form.brand, form.unbranded, ebayAspects.fields]);
   const fieldRefs = useRef<Partial<Record<ReceiveFieldKey, HTMLElement | null>>>({});
   const channelAttrs = useRef<Record<string, string>>({});
-  const [channelMissing, setChannelMissing] = useState(0);
+  const [channelMissing] = useState(0);
   const [dns, setDns] = useState(false);
   const dnsRequired = isDnsType(form);
   const doNotShip = dns || dnsRequired;
@@ -726,9 +725,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const missChooseFile = useRef<HTMLInputElement>(null);
   const missPromptedFor = useRef<string | null>(null);
   const photoIdentifyRequest = useRef(0);
-  const typingTarget = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
-  const [typingOpen, setTypingOpen] = useState(false);
-  const [typingShift, setTypingShift] = useState(false);
   const photoCheckedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -763,7 +759,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [dialog]);
 
   function openBarcodeCamera() {
-    setTypingOpen(false);
     setCamera(true);
   }
   const chain = useRef<Promise<void>>(Promise.resolve());
@@ -859,21 +854,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   function suppressPhotoPrompt(upc = current?.upc) {
     if (!upc) return;
     try { sessionStorage.setItem(`floor:receive-photo-dismissed:${storeId}:${upc}`, '1'); } catch { /* suppression is best-effort */ }
-  }
-  function typeReceiveKey(key: string) {
-    const target = typingTarget.current;
-    if (!target) return;
-    const start = target.selectionStart ?? target.value.length;
-    const end = target.selectionEnd ?? start;
-    const insertion = key === 'SPACE' ? ' ' : key;
-    const next = key === 'BACKSPACE'
-      ? (start === end ? target.value.slice(0, Math.max(0, start - 1)) + target.value.slice(end) : target.value.slice(0, start) + target.value.slice(end))
-      : target.value.slice(0, start) + insertion + target.value.slice(end);
-    const caret = key === 'BACKSPACE' ? Math.max(0, start - (start === end ? 1 : 0)) : start + insertion.length;
-    const prototype = target instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(target, next);
-    target.dispatchEvent(new Event('input', { bubbles: true }));
-    requestAnimationFrame(() => { target.focus(); target.setSelectionRange(caret, caret); });
   }
   const update = (key: keyof Form, value: string) => {
     const dimensionField = ({length:'package_length_in',width:'package_width_in',height:'package_height_in',weight:'package_weight_lb',
@@ -1472,19 +1452,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!pos(p?.ask ?? null)) out.push('price');
     if (!form.condition) out.push('condition');
     if (!brandReady()) out.push('brand');
-    // eBay category / required specifics never block a Floor save — unfinished flags cover them.
     if (upcRequired(channels) && !upcReady()) out.push('upc');
     else if (channels.includes('ebay') && !upcReady() && !form.noUpc) out.push('upc');
     return out;
   }
-  function ebaySoftGaps(): string[] {
-    if (doNotList) return [];
-    const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
-    const attrs = withFloorBrandOnEbay(ebayAspects.attributes, ebayAspects.fields, brandValue);
-    if (!ebayAspects.categoryId || !ebayAspects.fields.length) return ['category'];
-    return missingEbayAspects(ebayAspects.fields, attrs, ebayAspects.na);
-  }
-  /** Listing requirements only (price, condition, category, brand, UPC, weight+dims, item specifics, photo). */
+  /** Listing requirements only (price, condition, brand, UPC, weight+dims, photo). eBay category is not one of them. */
   function missingFor(p: Parsed): string[] {
     const photo = personPhotoReady();
     const quantityOk = Number(form.quantity) >= 1;
@@ -1504,17 +1476,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       });
     }
     const gaps = listingGaps(p);
-    const out: string[] = [...gaps.map(g => (g === 'ebay_category' ? 'category' : g === 'ebay_aspects' ? 'item specifics' : g))];
-    if (!storeCategoryValue() && !out.includes('store category')) out.push('store category');
-    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: out, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, hasLocation });
+    return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: gaps, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, hasLocation });
   }
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
-  const ebayCheck = ebayDetailsStatus({
-    categoryId: ebayAspects.categoryId || '',
-    fields: ebayAspects.fields,
-    attributes: ebayAspects.attributes,
-    conditionAllowed: Boolean(form.condition) && isFloorReceiveCondition(form.condition),
-  });
   const formValid = liveMissing.length === 0 && (doNotList || channelMissing === 0);
 
   /* ----- finish ----- */
@@ -1558,12 +1522,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
     if (!doNotList && !dupAck && !ackDup && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
     if (doNotList) setWarning('Saving without listing — hidden from the website and marketplaces.');
-    else {
-      const soft = ebaySoftGaps();
-      if (soft.length) {
-        setWarning(`Saving to Floor. eBay still needs: ${soft.join(', ')}. It will show as unfinished until those are filled.`);
-      }
-    }
     await receive(parsed, null, acceptedStockPhotoPath);
   }
 
@@ -1796,6 +1754,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       put('upc', UPC_NOT_APPLICABLE);
     }
     if (doNotList) put('do_not_list', true);
+    const ebayBrand = form.unbranded ? 'Unbranded' : form.brand.trim();
+    if (ebayBrand) {
+      const existing = (specs.ebay_aspects && typeof specs.ebay_aspects === 'object')
+        ? (specs.ebay_aspects as Record<string, unknown>)
+        : {};
+      put('ebay_aspects', { ...existing, Brand: ebayBrand });
+    }
     if (!staffMode && doNotShip) put('do_not_ship', true); // Server derives automatic appliance DNS for clerks.
     if (hold) { put('hold_reason', hold.reason); put('hold_note', hold.note.trim()); }
     const hide = Boolean(hold) || forceHide || doNotList;
@@ -2250,9 +2215,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const foundTitle = text(result?.merged?.title);
     const foundBrand = text(result?.merged?.brand);
     const lot = text(result?.receive?.lot_id);
-    return <section className="panel receive-panel receive-v2 receive-app receive-steps-host">
+      return <section className="panel receive-panel receive-v2 receive-app receive-steps-host">
       <ReceiveWizard
-        client={client} storeId={storeId} accessToken={accessToken} staffMode={staffMode}
+        staffMode={staffMode}
         lookupId={current?.id || null} lookupStatus={current?.status || null}
         miss={isTrueCatalogMiss(result)} title={foundTitle} brand={foundBrand}
         details={[result?.receive?.item_number, text(result?.merged?.category)].filter(Boolean).join(' · ')}
@@ -2309,16 +2274,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         stockMatches={stockMatches}
         onAddToStock={sku => { const match = stockMatches.find(item => item.sku === sku); if (match) void addToExistingStock(match); }}
         addingToStock={busy}
-        ebayAspects={ebayAspects} setEbayAspects={setEbayAspects}
-        needsSpecifics={missingEbayAspects(
-          ebayAspects.fields,
-          withFloorBrandOnEbay(ebayAspects.attributes, ebayAspects.fields, form.unbranded ? 'Unbranded' : form.brand),
-          ebayAspects.na,
-        ).length > 0}
         busy={busy} error={error || photoIdError}
         nextSku={options?.next_sku || ''}
         upc={form.upc || current?.upc || ''}
-        category={ebayAspects.path || ''}
         savedNotice={savedNotice}
         onSave={() => { void finish(undefined, true); }}
         onCancel={() => onAppCancel?.()}
@@ -2343,18 +2301,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   return <section className={`panel receive-panel receive-v2${appChrome ? ' receive-app' : ''}`}>
-    {/* Camera is primary on store phones; keep the Floor keyboard off the scanner and Look up. */}
-    {/* Store-phone Receive uses the camera wizard — keep Floor keyboard off those screens. */}
-    {!storePhoneMode && (appChrome) && !camera && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
-      {typingOpen ? 'Hide Floor keyboard' : '⌨ Floor keyboard'}
-    </button>}
-    {typingOpen && !camera && !storePhoneMode && <div className="receive-typing-pad" role="group" aria-label="Floor typing pad">
-      <div className="receive-typing-row">{'1234567890'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey(key)}>{key}</button>)}</div>
-      <div className="receive-typing-row">{'qwertyuiop'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>
-      <div className="receive-typing-row">{'asdfghjkl'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>
-      <div className="receive-typing-row"><button type="button" onPointerDown={e => e.preventDefault()} onClick={() => setTypingShift(value => !value)}>⇧</button>{'zxcvbnm'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}<button type="button" onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey('BACKSPACE')}>⌫</button></div>
-      <div className="receive-typing-row">{[',', '.', '&', '/'].map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey(key)}>{key}</button>)}<button type="button" className="receive-typing-space" onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey('SPACE')}>Space</button><button type="button" onPointerDown={e => e.preventDefault()} onClick={() => { setTypingOpen(false); requestAnimationFrame(() => { upcInput.current?.focus(); }); }}>Done · scan</button></div>
-    </div>}
     {appChrome && (
       <div className="app-nav receive-app-nav">
         <button type="button" onClick={() => { onAppCancel?.(); }}>Cancel</button>
@@ -2372,7 +2318,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input
             ref={upcInput}
             value={draft || (!manual && showForm && current?.upc) || ''}
-            onFocus={e => { typingTarget.current = e.currentTarget; }}
             onChange={e => setDraft(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); enqueue(draft); } }}
             onBlur={() => {
@@ -2512,21 +2457,20 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         {stockPhotoError && <small className="receive-confirm-note" role="status">{stockPhotoError}</small>}
         <label className="receive-title-field">Item title
-          <textarea ref={titleField} rows={2} value={form.title} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('title', e.target.value)} />
+          <textarea ref={titleField} rows={2} value={form.title} onChange={e => update('title', e.target.value)} />
         </label>
         <div className="receive-confirm-fields">
-          <label>Brand<input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('brand', e.target.value)} />
+          <label>Brand<input value={form.unbranded ? 'Unbranded' : form.brand} disabled={form.unbranded} onChange={e => update('brand', e.target.value)} />
             <button type="button" className="text-button" onClick={chooseNoBrand}>No brand</button></label>
-          <label>Model<input value={form.model} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('model', e.target.value)} /></label>
-          <label>Variant<input value={form.variant} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
-          <label>Size<input value={form.size} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
+          <label>Model<input value={form.model} onChange={e => update('model', e.target.value)} /></label>
+          <label>Variant<input value={form.variant} onChange={e => update('variant', e.target.value)} placeholder="Scent, color…" /></label>
+          <label>Size<input value={form.size} onChange={e => update('size', e.target.value)} placeholder="Size or measurements" /></label>
           <CategoryField
             label="Floor category"
             value={form.category}
             options={choices(options?.categories)}
             hint="Online store categories are set after saving. Floor fills a suggested eBay category when it finds a match; otherwise search the channel categories below."
             onChange={v => update('category', v)}
-            onFocus={e => { typingTarget.current = e.currentTarget; }}
           />
           <div className="receive-condition-field"><span>Condition</span><div className="receive-chip-row" role="radiogroup" aria-label="Condition">
             {CONDITIONS.map(([value, label]) => <label className={`receive-chip${form.condition === value ? ' on' : ''}`} key={value}>
@@ -2534,7 +2478,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             </label>)}
           </div></div>
         </div>
-        {isDefectiveCondition(form.condition) && <label className="receive-confirm-full">Defect note<input value={form.conditionNote} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('conditionNote', e.target.value)} /></label>}
+        {isDefectiveCondition(form.condition) && <label className="receive-confirm-full">Defect note<input value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
         {!storePhoneMode && <details className="receive-confirm-details"><summary>Description {form.description ? '· filled' : '· empty'}</summary>
           <textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></details>}
         {!storePhoneMode && <details className="receive-confirm-details"><summary>Product · {[form.productHeight, form.productWidth, form.productDepth].every(Boolean)
@@ -2574,7 +2518,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {!staffMode && photoPrice?.listings?.[0] && <a className="receive-confirm-source" href={photoPrice.listings[0].url} target="_blank" rel="noreferrer">
             {photoPrice.listings[0].store} · {money(photoPrice.listings[0].price_cents)} · source ↗</a>}
           <div className="receive-confirm-bottom-row">
-            <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('ask',e.target.value)} /></label>
+            <label>Price<ManifestReceiveReference result={manifestReference} /><input inputMode="decimal" placeholder="0.00" value={form.ask} onChange={e => update('ask',e.target.value)} /></label>
             {!staffMode && <label>Cost<input inputMode="decimal" placeholder="Leave blank if unknown" value={form.cost} onChange={e => update('cost',e.target.value)} /></label>}
           </div>
           <div className={`receive-location-card${showSaveValidation && !selectedLocation.trim() && !doNotList ? ' receive-v2-invalid' : ''}`}><label>Location{!doNotList ? ' *' : ''}<select value={selectedLocation} onChange={e => setSelectedLocation(e.target.value)}>
@@ -2718,32 +2662,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input type="checkbox" checked={form.unbranded} onChange={e => setForm(p => ({ ...p, unbranded: e.target.checked, title: composeListingTitle(p.brand, p.model, e.target.checked) }))} />
           No brand
         </label>
-
-        <ReceiveCategoryAspects
-          client={client}
-          storeId={storeId}
-          accessToken={accessToken}
-          doNotList={doNotList}
-          channels={channels}
-          disabled={busy}
-          showErrors={showSaveValidation || Boolean(ebayAspects.categoryId)}
-          identity={{
-            brand: form.unbranded ? 'Unbranded' : form.brand,
-            model: form.model,
-            title: form.title,
-            condition: form.condition,
-            upc: form.noUpc ? '' : (form.upc || current?.upc || ''),
-          }}
-          onChannelValues={(next, missing) => { channelAttrs.current = next; setChannelMissing(missing); }}
-          value={ebayAspects}
-          onChange={next => {
-            setEbayAspects(next);
-            // Floor chips (New / Open box / Used · Good / Used · Fair) are not eBay grade names —
-            // never clear a clerk's pick when the category's eBay allow-list refreshes.
-            const modelGuess = next.attributes.Model || next.attributes.Type || next.attributes['Model Number'] || '';
-            if (modelGuess && !form.model.trim()) update('model', modelGuess);
-          }}
-        />
         </ReceiveSection>}
 
         {!(staffMode && doNotList) && <ReceiveSection id="price" title="Price & condition" required={!doNotList} open={sectionOpen('price')} onOpen={toggleSection}
@@ -2767,7 +2685,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               <button type="button" key={value} className={`receive-chip${form.condition === value ? ' on' : ''}`} onClick={() => update('condition', value)}>{label}</button>
             ))}
           </div>
-          {ebayAspects.conditionNote ? <p className="rcv-note">{ebayAspects.conditionNote}</p> : null}
         </div>
         <ReceiveQuantity value={form.quantity} onChange={value => update('quantity', value)} disabled={busy} />
         </ReceiveSection>}
@@ -2808,7 +2725,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <input
             value={form.noUpc ? UPC_NOT_APPLICABLE : form.upc}
             disabled={form.noUpc}
-            onFocus={e => { typingTarget.current = e.currentTarget; }}
             onChange={e => {
               const v = e.target.value;
               setForm(p => ({ ...p, upc: v, noUpc: false }));
@@ -2842,21 +2758,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </ReceiveSection>}
 
         {!(staffMode && doNotList) && <ReceiveSection id="details" title="Details" open={sectionOpen('details')} onOpen={toggleSection}
-          tone={liveMissing.includes('store category') || !ebayCheck.ready ? 'bad' : 'muted'}
-          status={liveMissing.includes('store category') ? 'Store category' : ebayCheck.text}>
-          <p className="rcv-note">eBay check</p>
-          <strong>{ebayCheck.ready ? 'All required fields set' : 'Still missing a required eBay field'}</strong>
-          <div className="rcv-ebay-rows">
-            <p><span>Category</span><strong>{ebayAspects.path ? ebayAspects.path.split('>').slice(-2).join(' · ') : 'Not set'}</strong></p>
-            <p><span>Condition</span><strong>{form.condition || 'Not set'}</strong></p>
-            {ebayAspects.fields.filter(field => field.required).map(field => (
-              <p key={field.name}><span>{field.name}</span><strong>{ebayAspects.attributes[field.name] || 'Missing'}</strong></p>
-            ))}
-            {form.description ? <p><span>Description</span><strong>From UPC</strong></p> : null}
-          </div>
+          tone="muted"
+          status={form.title.trim() ? 'Title set' : 'Optional'}>
           <label>Title<input value={form.title} onChange={e => update('title', e.target.value)} placeholder="Brand + specifics" autoComplete="off" /></label>
           <label>Description<textarea rows={2} value={form.description} onChange={e => update('description', e.target.value)} /></label>
-          <CategoryField label="Store category" value={form.category} options={choices(options?.categories)} onChange={v => update('category', v)} onFocus={e => { typingTarget.current = e.currentTarget; }} />
+          <CategoryField label="Store category" value={form.category} options={choices(options?.categories)} onChange={v => update('category', v)} />
           {!staffMode && <label>Manifest<select value={manifestId} onChange={e => setManifestId(e.target.value)}><option value="">No manifest</option>{manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}</select></label>}
         </ReceiveSection>}
 
@@ -2867,7 +2773,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         {!unifiedV2 && <>
         <label className="unit-edit-wide">
           Title
-          <input value={form.title} onFocus={e => { typingTarget.current = e.currentTarget; }} onChange={e => update('title', e.target.value)} placeholder="Brand + item specifics" autoComplete="off" />
+          <input value={form.title} onChange={e => update('title', e.target.value)} placeholder="Brand + item specifics" autoComplete="off" />
         </label>
         {manual && <label className="unit-edit-wide">Description<textarea rows={3} value={form.description} onChange={e => update('description', e.target.value)} /></label>}
         {manual && !staffMode && <label>Cost<input inputMode="decimal" value={form.cost} onChange={e => update('cost', e.target.value)} /></label>}
