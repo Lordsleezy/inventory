@@ -31,6 +31,20 @@ test('a missing title is asked, and eBay category never is', () => {
   }), ['confirm', 'photo', 'title', 'condition', 'price', 'dims', 'stock', 'location', 'review']);
 });
 
+test('New and Open box with a manifest price skip the price screen', () => {
+  assert.deepEqual(receiveStepPlan({
+    doNotList: false, brand: 'Kohler', title: 'Terzet',
+    hasDims: true, hasStockMatch: false, manifestPrice: true,
+  }), ['confirm', 'photo', 'condition', 'location', 'review']);
+});
+
+test('a used unit still asks for a price when the manifest has one', () => {
+  assert.deepEqual(receiveStepPlan({
+    doNotList: false, brand: 'Kohler', title: 'Terzet',
+    hasDims: true, hasStockMatch: false, manifestPrice: false,
+  }), ['confirm', 'photo', 'condition', 'price', 'location', 'review']);
+});
+
 test('eBay category and specifics never get a Receive screen', () => {
   assert.deepEqual(receiveStepPlan({
     doNotList: false, brand: 'Infinity X1', title: 'Flashlight',

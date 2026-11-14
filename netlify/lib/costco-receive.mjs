@@ -18,6 +18,44 @@ export function hamming(left, right) {
   return distance;
 }
 
+/** One manifest item number named by a Costco page. Two different items means no guess. */
+export function manifestItemFromText(text, itemNumbers) {
+  const want = new Set((itemNumbers || []).map(value => String(value || "").replace(/\D/g, "")).filter(value => value.length >= 6 && value.length <= 8));
+  const found = new Set();
+  const source = String(text || "");
+  for (const match of source.matchAll(/costco\.com\/p\/[^"'\\\s<>]*?\/(\d{6,8})\b/gi)) {
+    if (want.has(match[1])) found.add(match[1]);
+  }
+  for (const match of source.matchAll(/"sku"\s*:\s*"(\d{6,8})"/gi)) {
+    if (want.has(match[1])) found.add(match[1]);
+  }
+  for (const match of source.matchAll(/\bItem\s+#?\s*(\d{6,8})\b/gi)) {
+    if (want.has(match[1])) found.add(match[1]);
+  }
+  return found.size === 1 ? [...found][0] : null;
+}
+
+async function defaultRetailUpcSearch(code, itemNumbers) {
+  const headers = { "User-Agent": "Mozilla/5.0" };
+  try {
+    const search = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(`${code} site:costco.com`)}`, {
+      headers, signal: AbortSignal.timeout(8000),
+    });
+    const html = await search.text();
+    const direct = manifestItemFromText(html, itemNumbers);
+    if (direct) return direct;
+    const links = [...new Set([...html.matchAll(/uddg=([^&"]+)/g)].map(match => {
+      try { return decodeURIComponent(match[1]); } catch { return ""; }
+    }).filter(url => /^https:\/\/www\.costco\.com\/p\//i.test(url)))].slice(0, 2);
+    for (const page of links) {
+      const res = await fetch(page, { headers, signal: AbortSignal.timeout(8000) });
+      const item = manifestItemFromText(await res.text(), itemNumbers);
+      if (item) return item;
+    }
+  } catch { /* a miss stays a miss */ }
+  return null;
+}
+
 /** A unique same-length barcode within `max` digit changes. A tie stays unmatched. */
 export function nearestManifestLine(scanned, lines, max = 3) {
   const code = digits(scanned);
@@ -201,7 +239,7 @@ function itemAspects(product, amazon, pinned) {
   return aspects;
 }
 
-export function buildCostcoReceive({ line, enrich = {}, product = null, amazon = null, costco = null, stripMoney = false }) {
+export function buildCostcoReceive({ line, enrich = {}, product = null, amazon = null, upcitemdb = null, costco = null, stripMoney = false }) {
   const decision = classifyCostcoLine({ line, enrich, product, amazon });
   const pinned = enrich?.pinned && typeof enrich.pinned === "object" ? enrich.pinned : null;
   const useCatalog = decision.trusted;
@@ -219,15 +257,14 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
     product, amazon, expandedTitle, trusted: useCatalog,
   });
   const expandedPkg = enrich?.package && typeof enrich.package === "object" ? enrich.package : {};
-  // The title can stay untrusted without throwing away the box saved for this barcode.
-  // A different product's Amazon package is not used unless that catalog match itself is trusted.
-  const savedBox = packageFrom(product, null, null);
-  const catalogBox = useCatalog ? packageFrom(product, amazon, pinned) : savedBox;
+  // The title can stay untrusted. The box measured for this barcode still fills Receive.
+  const catalogBox = packageFrom(product, amazon, useCatalog ? pinned : null);
+  const listed = upcitemdb?.package || {};
   const pkg = {
-    length_in: catalogBox.length_in || numberOrNull(expandedPkg.length_in),
-    width_in: catalogBox.width_in || numberOrNull(expandedPkg.width_in),
-    height_in: catalogBox.height_in || numberOrNull(expandedPkg.height_in),
-    weight_lb: catalogBox.weight_lb || numberOrNull(expandedPkg.weight_lb),
+    length_in: catalogBox.length_in || numberOrNull(expandedPkg.length_in) || numberOrNull(listed.length_in),
+    width_in: catalogBox.width_in || numberOrNull(expandedPkg.width_in) || numberOrNull(listed.width_in),
+    height_in: catalogBox.height_in || numberOrNull(expandedPkg.height_in) || numberOrNull(listed.height_in),
+    weight_lb: catalogBox.weight_lb || numberOrNull(expandedPkg.weight_lb) || numberOrNull(listed.weight_lb),
   };
   const aspects = useCatalog ? itemAspects(product, amazon, pinned) : specificsFrom(enrich?.specifics);
   const pack = packCountOf(line?.description, enrich?.variant_note, product?.aspects);
@@ -395,7 +432,18 @@ function searchCard(rows, stripMoney) {
   };
 }
 
-export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false } = {}) {
+async function linesForStore(sb, ids) {
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await sb.from("manifest_lines").select(LINE_COLS).in("manifest_id", ids).range(from, from + 999);
+    if (error) throw new Error(error.message);
+    rows.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return rows;
+}
+
+export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false, retailUpcSearch } = {}) {
   const found = await findManifestLine(sb, storeId, raw);
   if (found.many.length > 1) return searchCard(found.many, stripMoney);
   const code = digits(raw);
@@ -411,9 +459,8 @@ export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false
     };
   }
   if (!found.line && found.ids.length && code.length >= 8 && !isCostcoInternalCode(code)) {
-    const { data, error } = await sb.from("manifest_lines").select(LINE_COLS).in("manifest_id", found.ids).limit(500);
-    if (error) throw new Error(error.message);
-    const near = nearestManifestLine(code, data || []);
+    const lines = await linesForStore(sb, found.ids);
+    const near = nearestManifestLine(code, lines);
     if (near) {
       const ctx = await loadContext(sb, storeId, near.line);
       const card = buildCostcoReceive({
@@ -421,12 +468,34 @@ export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false
         enrich: ctx.enrich,
         product: ctx.product,
         amazon: ctx.payload?.amazon || null,
+        upcitemdb: ctx.payload?.upcitemdb || null,
         costco: ctx.payload?.costco || null,
         stripMoney,
       });
       card.receive.suggested = true;
       card.receive.scanned_code = code;
       return card;
+    }
+    if (code.length >= 12) {
+      const numbers = lines.flatMap(line => [line.tcin, line.item_number]);
+      let item = null;
+      try { item = await (retailUpcSearch || defaultRetailUpcSearch)(code, numbers); } catch { item = null; }
+      const line = item ? lines.find(row => String(row.tcin) === item || String(row.item_number) === item) : null;
+      if (line) {
+        try { await attachManifestAlternate(sb, storeId, { scanned: code, itemNumber: item }); } catch { /* this scan still opens the line */ }
+        const ctx = await loadContext(sb, storeId, line);
+        const card = buildCostcoReceive({
+          line,
+          enrich: ctx.enrich,
+          product: ctx.product,
+          amazon: ctx.payload?.amazon || null,
+          upcitemdb: ctx.payload?.upcitemdb || null,
+          costco: ctx.payload?.costco || null,
+          stripMoney,
+        });
+        card.receive.scanned_code = code;
+        return card;
+      }
     }
   }
   if (!found.line) return null;
@@ -436,6 +505,7 @@ export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false
     enrich: ctx.enrich,
     product: ctx.product,
     amazon: ctx.payload?.amazon || null,
+    upcitemdb: ctx.payload?.upcitemdb || null,
     costco: ctx.payload?.costco || null,
     stripMoney,
   });
@@ -582,16 +652,21 @@ export async function attachManifestAlternate(sb, storeId, { scanned, itemNumber
   if (!/^\d{8,14}$/.test(code)) throw Object.assign(new Error("That is not a barcode"), { status: 400 });
   const found = await findManifestLine(sb, storeId, itemNumber);
   if (!found.line) throw Object.assign(new Error("That item is not on a manifest"), { status: 404 });
-  const located = await sb.from("manifest_lines").select("id, alternate_upcs, tcin")
+  const item = String(found.line.item_number || found.line.tcin || "");
+  if (!/^\d{4,12}$/.test(item)) throw Object.assign(new Error("That item is not on a manifest"), { status: 404 });
+  const located = await sb.from("manifest_lines").select("manifest_id,line_number,alternate_upcs,tcin,item_number")
     .in("manifest_id", found.ids)
-    .eq("item_number", String(found.line.item_number || ""))
-    .limit(1);
-  const row = located.data?.[0];
-  if (located.error || !row?.id) throw Object.assign(new Error(located.error?.message || "manifest_line_not_found"), { status: 404 });
-  const next = [...new Set([...(row.alternate_upcs || []).map((item) => digits(item)).filter(Boolean), code])];
-  const saved = await sb.from("manifest_lines").update({ alternate_upcs: next }).eq("id", row.id);
-  if (saved.error) throw new Error(saved.error.message);
+    .or(`item_number.eq.${item},tcin.eq.${item}`);
+  const rows = located.data || [];
+  if (located.error || !rows.length) throw Object.assign(new Error(located.error?.message || "manifest_line_not_found"), { status: 404 });
+  const next = [...new Set([...rows.flatMap(row => (row.alternate_upcs || []).map(value => digits(value))), code].filter(Boolean))];
+  for (const row of rows) {
+    const saved = await sb.from("manifest_lines").update({ alternate_upcs: next })
+      .eq("manifest_id", row.manifest_id)
+      .eq("line_number", row.line_number);
+    if (saved.error) throw new Error(saved.error.message);
+  }
   const ctx = await loadContext(sb, storeId, found.line);
-  await remember(sb, storeId, ctx.key, ctx.book, String(found.line.tcin || row.tcin || ""), { alternate_upcs: next });
-  return { ok: true, item_number: found.line.item_number, alternate: code };
+  await remember(sb, storeId, ctx.key, ctx.book, String(found.line.tcin || rows[0].tcin || ""), { alternate_upcs: next });
+  return { ok: true, item_number: item, alternate: code };
 }
