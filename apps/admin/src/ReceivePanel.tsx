@@ -1,11 +1,10 @@
 import { ReceiveQuantity } from './ReceiveQuantity';
 import { ReceiveWorkStatus } from './ReceiveWorkStatus';
-import { scannerLifecycle } from './scannerLifecycle';
+import { ReceiveBarcodeScanner } from './ReceiveBarcodeScanner';
 import { commitReceive } from './receiveCommit';
 import { isDnsType } from './dns';
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FocusEvent, type RefObject } from 'react';
 import { ChannelPicker, type ChannelId } from './ChannelCheckboxes';
-import { createPortal } from 'react-dom';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isKioskShell, scannerInputMode } from './kiosk';
 import { floorFunctionUrl } from './floorApi';
@@ -28,14 +27,6 @@ import { CategoryPanel } from './CategoryPanel';
 import { EbaySpecificsPanel } from './EbaySpecificsPanel';
 import { isCompleteReceiveTitle, isStoreLabelBarcode, storeLabelWarning } from '../../../shared/store-barcode.mjs';
 import { cleanProductIdentity, withoutBrand } from '@floor/store';
-
-/** iOS/Android PWA: prefer native capture over getUserMedia (more reliable in standalone). */
-function preferNativeCapture() {
-  if (typeof navigator === 'undefined') return false;
-  return /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
-    || window.matchMedia('(display-mode: standalone)').matches
-    || (navigator as Navigator & { standalone?: boolean }).standalone === true;
-}
 
 /**
  * File picker that opens from a real user gesture on the <input> itself.
@@ -412,7 +403,7 @@ function catalogMissMessage(r?: Lookup): string | null {
   const fail = catalogLookupFailed(r);
   if (fail) return fail;
   if (isTrueCatalogMiss(r)) {
-    return 'No match in Amazon or UPCitemdb for this UPC — try a product photo, or fill the fields by hand.';
+    return "Can't find this item — take a photo";
   }
   const m = r.merged;
   const hasCatalog = Boolean(text(m?.title) || text(m?.brand) || text(m?.model) || text(m?.asin));
@@ -627,73 +618,6 @@ async function decodeFile(file: File): Promise<string | null> {
   return decodeBarcodeFile(file);
 }
 
-function CameraScanner({ onDetect, onFile, onClose }: {
-  onDetect: (code: string) => void; onFile: (file: File) => void; onClose: () => void;
-}) {
-  const video = useRef<HTMLVideoElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
-  const done = useRef(false);
-  const detect = useRef(onDetect);
-  detect.current = onDetect;
-  const [err, setErr] = useState('');
-  useEffect(() => {
-    let stream: MediaStream | null = null;
-    let timer = 0;
-    let stopped = false;
-    const lifecycle = scannerLifecycle(document, window, video.current, () => {
-      stopped = true; window.clearInterval(timer); onClose();
-    });
-    void (async () => {
-      try {
-        const Ctor = detectorCtor();
-        if (!Ctor) throw new Error('This browser cannot read barcodes from the camera.');
-        if (!navigator.mediaDevices?.getUserMedia) throw new Error('Camera API unavailable.');
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: 'environment' } },
-          audio: false,
-        });
-        if (!lifecycle.attach(stream)) return;
-        if (stopped) { stream.getTracks().forEach(t => t.stop()); return; }
-        const el = video.current;
-        if (!el) return;
-        el.srcObject = stream;
-        el.setAttribute('playsinline', 'true');
-        el.muted = true;
-        await el.play();
-        if (stopped || lifecycle.stopped) return;
-        const detector = new Ctor({ formats: FORMATS });
-        timer = window.setInterval(() => {
-          if (stopped || lifecycle.stopped) return;
-          void detector.detect(el).then(codes => {
-            const raw = codes[0]?.rawValue;
-            if (raw && !stopped && !lifecycle.stopped && !done.current) { done.current = true; detect.current(raw); }
-          }).catch(() => undefined);
-        }, 250);
-      } catch (e) { setErr(errText(e) || 'Camera unavailable. Use Take photo instead.'); }
-    })();
-    return () => { stopped = true; window.clearInterval(timer); lifecycle.stop(); };
-  }, []);
-  // Portal to body — app-mode uses position:fixed + overflow which clips nested fixed modals on iOS.
-  return createPortal(
-    <div className="receive-modal receive-modal-portal" role="dialog" aria-modal="true" aria-label="Scan barcode with camera">
-      <div className="receive-modal-card">
-        <h3>Scan barcode</h3>
-        {err ? <p className="error">{err}</p> : <video ref={video} className="receive-video" playsInline muted />}
-        <div className="actions">
-          <CaptureFileButton
-            inputRef={fileInput}
-            label="Take photo of barcode"
-            capture
-            onFiles={files => { const f = files?.[0]; if (f) onFile(f); }}
-          />
-          <button type="button" className="secondary" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  );
-}
-
 /* ================================================================================================ */
 
 export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, storePhoneMode = false, initialManual, initialUpc, onAppCancel }: Props) {
@@ -766,7 +690,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [photoIdStatus, setPhotoIdStatus] = useState('');
   const [photoIdError, setPhotoIdError] = useState('');
   const [photoNeed, setPhotoNeed] = useState('');
-  const [pickerBusy, setPickerBusy] = useState(false);
   const [boxCheck, setBoxCheck] = useState('');
   const [photoPrice, setPhotoPrice] = useState<PhotoPriceInfo | null>(null);
   const [photoPriceError, setPhotoPriceError] = useState('');
@@ -823,11 +746,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [dialog]);
 
   function openBarcodeCamera() {
-    // Phones / installed PWA: native capture is far more reliable than getUserMedia + BarcodeDetector.
-    if (preferNativeCapture() || appChrome || !detectorCtor()) {
-      cameraFile.current?.click();
-      return;
-    }
     setCamera(true);
   }
   const chain = useRef<Promise<void>>(Promise.resolve());
@@ -1122,42 +1040,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     enqueue(code);
   }
 
-  async function chooseVariant(title: string) {
-    if (!current || pickerBusy) return;
-    setPickerBusy(true);
-    setError('');
-    try {
-      const response = await fetch(floorFunctionUrl('upc-lookup'), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
-        body: JSON.stringify({
-          action: 'pin_variant',
-          upc: current.upc,
-          title,
-          item_number: current.result?.receive?.item_number || '',
-        }),
-      });
-      const json = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(json.error || json.message || 'That variant could not be saved');
-      setLoadedId(null);
-      setQueue(q => q.map(s => (s.id === current.id ? { ...s, status: 'ready', result: json as Lookup } : s)));
-    } catch (error) {
-      setError(errText(error) || 'That variant could not be saved. Choose none of these and photograph the box.');
-    } finally {
-      setPickerBusy(false);
-    }
-  }
-
-  function noneOfThese() {
-    if (!current?.result) return;
-    const next: Lookup = {
-      ...current.result,
-      receive: { ...current.result.receive, bucket: 'manifest', photo: true, candidates: [] },
-    };
-    setLoadedId(null);
-    setQueue(q => q.map(s => (s.id === current.id ? { ...s, result: next } : s)));
-  }
-
   async function saveBoxCheck(field: string, value: string) {
     const entered = value.trim();
     if (!current || !field || !entered) return;
@@ -1354,7 +1236,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       initial.noUpc = true;
       if (r.receive.item_number) initial.notes = `Costco item ${r.receive.item_number}`;
     }
-    if (r?.receive?.condition_hint && !initial.condition) initial.condition = r.receive.condition_hint;
+    // Condition stays blank. Costco returns are graded per unit.
     if (r?.receive?.pack_count && !/pack|count|\bct\b/i.test(`${initial.title} ${initial.model} ${initial.variant}`)) {
       initial.variant = [initial.variant, `${r.receive.pack_count} pack`].filter(Boolean).join(' ');
     }
@@ -1393,7 +1275,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const identityNeeds = missingIdentityFields(r);
     setPhotoPrice(null);
     const prewarmed = Boolean(r?.prewarmed);
-    const picking = r?.receive?.bucket === 'picker' || r?.receive?.bucket === 'search';
+    const picking = r?.receive?.bucket === 'search';
     if (!staffMode && !prewarmed && !identityNeeds.length && m?.title && m?.brand) {
       const priceIdentity = { title: m.title, brand: m.brand, model: m.model || '',
         variant: initial.variant, size: initial.size, unit_count: 1 };
@@ -1404,11 +1286,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       try { return sessionStorage.getItem(`floor:receive-photo-dismissed:${storeId}:${current.upc}`) === '1'; }
       catch { return false; }
     })();
-    if (!picking && (r?.receive?.photo || isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id && !photoDismissed) {
+    if (!picking && !prewarmed && (isTrueCatalogMiss(r) || identityNeeds.length > 0) && missPromptedFor.current !== current.id && !photoDismissed) {
       missPromptedFor.current = current.id;
       setPhotoNeed(r?.store_label ? storeLabelWarning()
-        : identityNeeds.length ? `Need: ${identityNeeds.join(', ')}. Take a photo of the product label.`
-          : 'No catalog match. Take a clear photo of the box or label.');
+        : isTrueCatalogMiss(r) ? "Can't find this item — take a photo"
+          : identityNeeds.length ? `Need: ${identityNeeds.join(', ')}. Take a photo of the product label.`
+          : "Can't find this item — take a photo");
       setPhotoIdError('');
       setDialog('miss-photo');
     } else {
@@ -1589,7 +1472,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     event?.preventDefault();
     setError(''); setWarning(''); setSaved([]);
     if (!manual && !current) { setError('Scan a UPC first, or use Enter manually.'); return; }
-    if (!manual && current?.result?.receive?.bucket === 'picker') { setError('Tap the variant on the box, or none of these.'); return; }
     if (!manual && current?.result?.receive?.bucket === 'search') { setError('Tap the manifest line that matches the box.'); return; }
     const brandError = notForSaleBrandError(doNotList, brandReady());
     if (brandError) { setError(brandError); return; }
@@ -2328,17 +2210,6 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     {!manual && current?.status === 'loading' && <div className="empty">Looking up {current.upc}…</div>}
 
     {showForm && <form id={appChrome ? 'receive-app-form' : undefined} onSubmit={e => void finish(e)}>
-      {result?.receive?.bucket === 'picker' && <div className="receive-picker" role="listbox" aria-label="Which variant is on the box">
-        <p><strong>Which one is on the box?</strong></p>
-        {(result.receive.candidates || []).map(candidate => {
-          const detail = [candidate.color, candidate.size].filter(Boolean).join(' · ');
-          return <button type="button" key={candidate.title} className="receive-picker-row" disabled={pickerBusy} onClick={() => void chooseVariant(candidate.title)}>
-            {candidate.photo ? <img src={candidate.photo} alt="" /> : null}
-            <span><strong>{candidate.title}</strong>{detail ? <small>{detail}</small> : null}</span>
-          </button>;
-        })}
-        <button type="button" className="receive-picker-none" disabled={pickerBusy} onClick={noneOfThese}>{pickerBusy ? 'Saving that one…' : 'None of these'}</button>
-      </div>}
       {result?.receive?.bucket === 'search' && <div className="receive-picker" role="listbox" aria-label="Manifest matches">
         <p><strong>Which manifest line?</strong></p>
         {(result.receive.matches || []).map(match => <button type="button" key={`${match.item_number}-${match.code}`} className="receive-picker-row" onClick={() => replaceScan(match.code || match.item_number)}>
@@ -2835,10 +2706,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>
     </form>}
 
-    {camera && <CameraScanner
+    {camera && <ReceiveBarcodeScanner
       onClose={() => { setCamera(false); focusUpc(); }}
       onDetect={code => { setCamera(false); enqueue(code); }}
-      onFile={file => { void decodeFile(file).then(code => { setCamera(false); if (code) enqueue(code); else { setError('Could not read a barcode from that photo. Type the digits instead.'); focusUpc(); } }); }}
     />}
 
     {dialog === 'ready' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="ready-title">
@@ -2877,7 +2747,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
     {dialog === 'miss-photo' && <div className="receive-modal" role="dialog" aria-modal="true" aria-labelledby="miss-photo-title">
       <div className="receive-modal-card">
-        <h3 id="miss-photo-title">{photoCandidate ? 'Confirm product from photo' : photoNeed ? 'More product details needed' : 'Can\'t find this item. Scan with camera?'}</h3>
+        <h3 id="miss-photo-title">{photoCandidate ? 'Confirm product from photo' : (photoNeed || "Can't find this item — take a photo")}</h3>
         <p>{photoCandidate ? photoConflictText : `${photoNeed || 'Take one clear photo of the box or label.'} We\'ll identify the product and show asking prices so you can set the price.`}</p>
         <ManifestReceiveReference result={manifestReference} />
         <ManifestSearchBox client={client} onPick={pickManifestLine} disabled={busy || photoIdBusy} />

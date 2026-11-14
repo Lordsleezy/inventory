@@ -2,7 +2,7 @@
  * Normalize scanned barcodes to GTIN-14 (and UPC-A / EAN-13 forms).
  * Supports UPC-A (12), EAN-13 (13), GTIN-14, and UPC-E (6–8).
  */
-import { gtinIssue } from "./gtin.mjs";
+import { gtinIssue, isCostcoInternalCode } from "./gtin.mjs";
 
 function digitsOnly(value) {
   return String(value ?? "").replace(/\D/g, "");
@@ -71,4 +71,45 @@ export function normalizeGtin(raw) {
   }
 
   return { ok: false, input, gtin14: null, upcA: null, ean13: null, issue: `unsupported length ${d.length}` };
+}
+
+/**
+ * Every stored form a scan might equal: UPC-A, EAN-13, GTIN-14, UPC-E expanded,
+ * an 11-digit code with the leading zero put back, and a zero-padded Costco item label.
+ * Costco 4999 codes stay as themselves. They are not manufacturer GTINs.
+ */
+export function barcodeLookupKeys(raw) {
+  const keys = new Set();
+  const add = (value) => {
+    const digits = digitsOnly(value);
+    if (/^\d{4,14}$/.test(digits)) keys.add(digits);
+  };
+  const d = digitsOnly(raw);
+  if (!d) return [];
+  add(d);
+  if (isCostcoInternalCode(d)) return [...keys];
+
+  if (d.length === 6 || d.length === 7 || (d.length === 8 && d[0] === "0")) {
+    const upcA = expandUpcE(d);
+    if (upcA && !gtinIssue(upcA)) add(upcA);
+  }
+
+  let code = d;
+  if (code.length === 11) {
+    const padded = `0${code}`;
+    if (!gtinIssue(padded)) code = padded;
+  }
+  if ((code.length === 12 || code.length === 13 || code.length === 14) && !gtinIssue(code)) {
+    const gtin14 = code.padStart(14, "0");
+    add(gtin14);
+    add(gtin14.slice(1));
+    add(gtin14.slice(2));
+    // Warehouse labels print the Costco item number with leading zeros and a check digit.
+    if (/^0{3,}/.test(code)) {
+      const item = code.slice(0, -1).replace(/^0+/, "");
+      if (item.length >= 4 && item.length <= 10) add(item);
+    }
+  }
+  if (d.length === 12 && d.startsWith("0")) add(d.slice(1));
+  return [...keys];
 }

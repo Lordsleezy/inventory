@@ -7,6 +7,7 @@ import { parseManifestLines } from './manifestLines';
 import { backfillManifestFiles, isCsvManifestFile } from './manifestBackfill';
 import { floorFunctionUrl } from './floorApi';
 import { formatCentsAsDollars, manifestTotalFromEachCents, manifestUnitCostCents, parseLotCostCents } from './manifestLotCost';
+import { ManifestLotCoverage } from './ManifestLotCoverage';
 
 type Manifest = {
   line_count: number; id: string; name: string; source: string; manifest_on: string; item_count: number;
@@ -265,7 +266,9 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
   }
 
   if (layout === 'desktop') {
-    return <ManifestsDesktop
+    return <>
+    <ManifestLotCoverage client={client} />
+    <ManifestsDesktop
       rows={rows} loaded={loaded} error={error} notice={notice} busy={busy} counting={counting}
       name={name} source={source} date={date} file={file} count={count} automatic={automatic}
       bulk={bulk} bulkManifest={bulkManifest} bulkSkus={bulkSkus} fileInput={fileInput}
@@ -275,13 +278,15 @@ export function ManifestsPage({ client, storeId, money, layout }: Props) {
       saveLotCost={saveLotCost} saveInlineCost={(row, cents) => void saveLotCost(row, { confirm: false, cents })}
       setError={setError} setName={setName} setSource={setSource} setDate={setDate} setCount={setCount} setAutomatic={setAutomatic} setBulk={setBulk} setBulkManifest={setBulkManifest}
       chooseFile={chooseFile} upload={upload} openFile={open} changeCount={changeCount} bulkTag={bulkTag} load={load}
-    />;
+    />
+    </>;
   }
 
   return <div className="floor-tools manifests-page">
     <header><div><h1>Manifests</h1><p>Upload and manage your inventory manifests.</p></div></header>
     {error && <div className="alert" role="alert">{error}<button type="button" aria-label="Dismiss error" onClick={() => setError('')}>×</button></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
+    <ManifestLotCoverage client={client} />
     <ToolCard><ToolHeading icon="file" title="Add manifest" description="Upload a file and add details to create a new manifest."/>
       <form className="tool-form" onSubmit={e => void upload(e)}>
         <div><label className="manifest-upload-area"><ToolIcon name="upload"/><span><strong>{file ? file.name : 'Choose a file'}</strong><small>PDF, CSV, XLSX or images · up to 50 MB</small></span><input ref={fileInput} required disabled={busy || counting} type="file" accept=".pdf,.csv,.xlsx,.png,.jpg,.jpeg,.webp,.heic,image/*" onChange={e => void chooseFile(e.target.files?.[0] || null)}/></label>{counting && <small role="status">Counting spreadsheet items…</small>}</div>
