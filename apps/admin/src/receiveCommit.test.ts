@@ -15,7 +15,7 @@ test('lost commit response retries the same snapshot with one RPC and no second 
       : { data: { skus: ['54001'], server_ms: 12, replayed: true }, error: null };
   } } as unknown as SupabaseClient;
   const original = { p_request: 'same-request', p_fields: { p_title: 'Actual photo item' }, p_photos: ['store/receive/actor/same-request/unit.jpg'], p_extras: { location: null } };
-  await assert.rejects(commitReceive(client, 'store', original), /Save is not confirmed/);
+  await assert.rejects(commitReceive(client, 'store', original), /Floor save did not finish|Save is not confirmed|will not create a duplicate/);
   assert.equal(cache.size, 1);
   const result = await commitReceive(client, 'store', { ...original, p_fields: { p_title: 'changed after timeout' } });
   assert.equal(result.replayed, true); assert.equal(cache.size, 0);

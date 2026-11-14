@@ -22,6 +22,7 @@ import { receiveSpecifics, receiveVariant } from '../../../shared/receive-specif
 import { ebayDetailsStatus } from '../../../shared/ebay-category-present.mjs';
 import { filterCategoryOptions, isMattressAccessory, matchReceiveCategory } from '../../../shared/receive-category.mjs';
 import { notForSaleBrandError, receiveMissingFields, missingEbayAspects, upcRequired, receiveFieldMessage, receiveSectionForGap, type ReceiveFieldKey } from './receive-validation';
+import { withFloorBrandOnEbay } from './ebayBrandMap';
 import { ReceiveSection } from './ReceiveSection';
 import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCategoryAspects';
 import { CategoryPanel } from './CategoryPanel';
@@ -689,6 +690,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [ebayAspects, setEbayAspects] = useState<ReceiveAspectState>({
     categoryId: null, path: null, fields: [], attributes: {}, na: {},
   });
+  useEffect(() => {
+    const brandValue = form.unbranded ? 'Unbranded' : form.brand;
+    setEbayAspects(prev => {
+      const next = withFloorBrandOnEbay(prev.attributes, prev.fields, brandValue);
+      return next === prev.attributes ? prev : { ...prev, attributes: next };
+    });
+  }, [form.brand, form.unbranded, ebayAspects.fields]);
   const fieldRefs = useRef<Partial<Record<ReceiveFieldKey, HTMLElement | null>>>({});
   const channelAttrs = useRef<Record<string, string>>({});
   const [channelMissing, setChannelMissing] = useState(0);
@@ -1130,12 +1138,82 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setDimensionsError('');
   }
 
+  /** Load aspect fields + Brand/Type guesses for a known leaf. Never leave categoryId with empty fields. */
+  async function hydrateEbayCategory(
+    scanId: string,
+    choice: { category_id: string; path?: string },
+    identity: { brand: string; model: string; title: string; condition: string; upc: string },
+    token: number,
+  ) {
+    const looked = await client.rpc('portal_ebay_category_form', { p_category_id: choice.category_id });
+    const row = looked.error ? null : looked.data as { path?: string; fields?: ReceiveAspectState['fields'] } | null;
+    const preview = await fetch(floorFunctionUrl('ebay-specifics'), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        store_id: storeId,
+        action: 'preview-receive',
+        category_id: choice.category_id,
+        path: choice.path || '',
+        identity,
+        attributes: {},
+      }),
+    });
+    const picked = await preview.json().catch(() => ({}));
+    if (token !== categoryRequest.current || activeScan.current !== scanId) return;
+    if (!preview.ok || picked.ok === false) return;
+    const path = String(picked.path || row?.path || choice.path || '');
+    const fields = (picked.fields || row?.fields || []) as ReceiveAspectState['fields'];
+    const attributes = withFloorBrandOnEbay(
+      (picked.attributes || {}) as Record<string, string>,
+      fields,
+      identity.brand,
+    );
+    setEbayAspects({
+      categoryId: String(choice.category_id),
+      path,
+      fields,
+      attributes,
+      na: {},
+      allowedGrades: picked.conditions || [],
+      conditionNote: String(picked.conditionNote || ''),
+    });
+    if (categoryTouched.current) return;
+    setForm(prev => {
+      if (prev.category.trim()) return prev;
+      const names = choices(options?.categories);
+      let next = matchReceiveCategory(names, {
+        category: prev.category,
+        title: [prev.title, path].filter(Boolean).join(' '),
+        brand: prev.brand,
+        model: prev.model,
+      });
+      if (!next) {
+        const leaf = path.split('>').pop()?.trim().toLowerCase() || '';
+        next = names.find(name => name.toLowerCase() === leaf)
+          || names.find(name => /^uncategorized$/i.test(name))
+          || names[0]
+          || '';
+      }
+      return next && next !== prev.category ? { ...prev, category: next } : prev;
+    });
+  }
+
   /* Suggested eBay category, started with the scan so Item does not have to be opened. */
-  async function fillSuggestedCategory(scanId: string, identity: { brand: string; model: string; title: string; condition: string; upc: string }) {
-    const q = [identity.title, identity.brand].filter(Boolean).join(' ').trim();
-    if (q.length < 3) return;
+  async function fillSuggestedCategory(
+    scanId: string,
+    identity: { brand: string; model: string; title: string; condition: string; upc: string },
+    knownCategoryId?: string,
+    knownPath?: string,
+  ) {
     const token = ++categoryRequest.current;
     try {
+      if (knownCategoryId && /^\d+$/.test(knownCategoryId)) {
+        await hydrateEbayCategory(scanId, { category_id: knownCategoryId, path: knownPath || '' }, identity, token);
+        return;
+      }
+      const q = [identity.title, identity.brand].filter(Boolean).join(' ').trim();
+      if (q.length < 3) return;
       const suggested = await fetch(floorFunctionUrl('ebay-specifics'), {
         method: 'POST',
         headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
@@ -1147,53 +1225,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const list = (suggestion.suggestions || []) as { category_id: string; path: string; best_match?: boolean }[];
       const choice = suggestion.preselect || list.find(item => item.best_match) || list[0];
       if (!choice?.category_id) return;
-      const looked = await client.rpc('portal_ebay_category_form', { p_category_id: choice.category_id });
-      const row = looked.error ? null : looked.data as { path?: string; fields?: ReceiveAspectState['fields'] } | null;
-      const preview = await fetch(floorFunctionUrl('ebay-specifics'), {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          store_id: storeId,
-          action: 'preview-receive',
-          category_id: choice.category_id,
-          path: choice.path,
-          identity,
-          attributes: {},
-        }),
-      });
-      const picked = await preview.json().catch(() => ({}));
-      if (token !== categoryRequest.current || activeScan.current !== scanId) return;
-      if (!preview.ok || picked.ok === false) return;
-      const path = String(picked.path || row?.path || choice.path || '');
-      const fields = (picked.fields || row?.fields || []) as ReceiveAspectState['fields'];
-      setEbayAspects({
-        categoryId: String(choice.category_id),
-        path,
-        fields,
-        attributes: (picked.attributes || {}) as Record<string, string>,
-        na: {},
-        allowedGrades: picked.conditions || [],
-        conditionNote: String(picked.conditionNote || ''),
-      });
-      if (categoryTouched.current) return;
-      setForm(prev => {
-        if (prev.category.trim()) return prev;
-        const names = choices(options?.categories);
-        let next = matchReceiveCategory(names, {
-          category: prev.category,
-          title: [prev.title, path].filter(Boolean).join(' '),
-          brand: prev.brand,
-          model: prev.model,
-        });
-        if (!next) {
-          const leaf = path.split('>').pop()?.trim().toLowerCase() || '';
-          next = names.find(name => name.toLowerCase() === leaf)
-            || names.find(name => /^uncategorized$/i.test(name))
-            || names[0]
-            || '';
-        }
-        return next && next !== prev.category ? { ...prev, category: next } : prev;
-      });
+      await hydrateEbayCategory(scanId, choice, identity, token);
     } catch {
       /* Opening Item still runs the same suggestion. */
     }
@@ -1267,9 +1299,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setForm(initial);
     if (!staffMode && r?.receive?.manifest_id) setManifestId(String(r.receive.manifest_id));
     const ebayCategory = String(r?.receive?.ebay_category_id || '');
-    setEbayAspects(/^\d+$/.test(ebayCategory)
-      ? { categoryId: ebayCategory, path: text(m?.category) || null, fields: [], attributes: {}, na: {} }
-      : { categoryId: null, path: null, fields: [], attributes: {}, na: {} });
+    // Do not set categoryId until fields hydrate — a bare id used to skip the category step.
+    setEbayAspects({ categoryId: null, path: null, fields: [], attributes: {}, na: {} });
     const miss = current.status === 'ready' || current.status === 'error'
       ? (current.status === 'error' ? null : catalogMissMessage(r))
       : null;
@@ -1335,7 +1366,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       title: initial.title,
       condition: initial.condition,
       upc: current.upc,
-    });
+    }, /^\d+$/.test(ebayCategory) ? ebayCategory : undefined, text(m?.category) || undefined);
     upcInput.current?.blur();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current?.id, current?.status, manual, loadedId]);
@@ -1441,11 +1472,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!pos(p?.ask ?? null)) out.push('price');
     if (!form.condition) out.push('condition');
     if (!brandReady()) out.push('brand');
-    if (!ebayAspects.categoryId) out.push('ebay_category');
-    else if (missingEbayAspects(ebayAspects.fields, ebayAspects.attributes, ebayAspects.na).length) out.push('ebay_aspects');
+    // eBay category / required specifics never block a Floor save — unfinished flags cover them.
     if (upcRequired(channels) && !upcReady()) out.push('upc');
     else if (channels.includes('ebay') && !upcReady() && !form.noUpc) out.push('upc');
     return out;
+  }
+  function ebaySoftGaps(): string[] {
+    if (doNotList) return [];
+    const brandValue = form.unbranded ? 'Unbranded' : form.brand.trim();
+    const attrs = withFloorBrandOnEbay(ebayAspects.attributes, ebayAspects.fields, brandValue);
+    if (!ebayAspects.categoryId || !ebayAspects.fields.length) return ['category'];
+    return missingEbayAspects(ebayAspects.fields, attrs, ebayAspects.na);
   }
   /** Listing requirements only (price, condition, category, brand, UPC, weight+dims, item specifics, photo). */
   function missingFor(p: Parsed): string[] {
@@ -1521,6 +1558,12 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
     if (!doNotList && !dupAck && !ackDup && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
     if (doNotList) setWarning('Saving without listing — hidden from the website and marketplaces.');
+    else {
+      const soft = ebaySoftGaps();
+      if (soft.length) {
+        setWarning(`Saving to Floor. eBay still needs: ${soft.join(', ')}. It will show as unfinished until those are filled.`);
+      }
+    }
     await receive(parsed, null, acceptedStockPhotoPath);
   }
 
@@ -1575,6 +1618,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         enrichment.specs.product_name_review_reasons = productIdentity.reasons;
       }
       enrichment.brand = brandValue; enrichment.model = modelValue; enrichment.title = titleValue;
+      const ebayAttrs = doNotList
+        ? {}
+        : withFloorBrandOnEbay(ebayAspects.attributes, ebayAspects.fields, brandValue);
       const data = await commitReceive(client, storeId, {
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
         p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
@@ -1582,7 +1628,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           channels: staffMode ? [] : channels, enrichment,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
           ebay_category_id: doNotList ? null : ebayAspects.categoryId,
-          ebay_attributes: doNotList ? {} : ebayAspects.attributes,
+          ebay_attributes: ebayAttrs,
           ebay_condition_id: doNotList ? null : (ebayAspects.allowedGrades || []).find(grade => grade.grade === (form.condition === 'Defective' ? 'For parts' : form.condition))?.conditionId || null,
           photo_identity_confirmed: photoTitleConfirmed,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
@@ -1596,7 +1642,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
             headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({
               store_id: storeId, sku: skus[0], action: 'category-selected',
-              attributes: ebayAspects.attributes,
+              attributes: ebayAttrs,
             }),
           });
         } catch (categoryError) {
@@ -2264,7 +2310,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         onAddToStock={sku => { const match = stockMatches.find(item => item.sku === sku); if (match) void addToExistingStock(match); }}
         addingToStock={busy}
         ebayAspects={ebayAspects} setEbayAspects={setEbayAspects}
-        needsSpecifics={missingEbayAspects(ebayAspects.fields, ebayAspects.attributes, ebayAspects.na).length > 0}
+        needsSpecifics={missingEbayAspects(
+          ebayAspects.fields,
+          withFloorBrandOnEbay(ebayAspects.attributes, ebayAspects.fields, form.unbranded ? 'Unbranded' : form.brand),
+          ebayAspects.na,
+        ).length > 0}
         busy={busy} error={error || photoIdError}
         nextSku={options?.next_sku || ''}
         upc={form.upc || current?.upc || ''}
@@ -2294,10 +2344,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
 
   return <section className={`panel receive-panel receive-v2${appChrome ? ' receive-app' : ''}`}>
     {/* Camera is primary on store phones; keep the Floor keyboard off the scanner and Look up. */}
-    {(appChrome || storePhoneMode) && !camera && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
+    {/* Store-phone Receive uses the camera wizard — keep Floor keyboard off those screens. */}
+    {!storePhoneMode && (appChrome) && !camera && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
       {typingOpen ? 'Hide Floor keyboard' : '⌨ Floor keyboard'}
     </button>}
-    {typingOpen && !camera && <div className="receive-typing-pad" role="group" aria-label="Floor typing pad">
+    {typingOpen && !camera && !storePhoneMode && <div className="receive-typing-pad" role="group" aria-label="Floor typing pad">
       <div className="receive-typing-row">{'1234567890'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey(key)}>{key}</button>)}</div>
       <div className="receive-typing-row">{'qwertyuiop'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>
       <div className="receive-typing-row">{'asdfghjkl'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>

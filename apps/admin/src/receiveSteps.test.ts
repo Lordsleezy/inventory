@@ -30,3 +30,10 @@ test('missing listing fields are asked before condition', () => {
     needsSpecifics: false, hasDims: false, hasStockMatch: true,
   }), ['confirm', 'photo', 'title', 'category', 'condition', 'price', 'dims', 'stock', 'location', 'review']);
 });
+
+test('a category id without loaded fields still asks for category and specifics', () => {
+  assert.deepEqual(receiveStepPlan({
+    doNotList: false, brand: 'Infinity X1', title: 'Flashlight', hasCategory: false,
+    needsSpecifics: true, hasDims: true, hasStockMatch: false,
+  }), ['confirm', 'photo', 'category', 'condition', 'price', 'location', 'review']);
+});
