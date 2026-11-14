@@ -34,7 +34,7 @@ async function fetchText(url, headers = {}) {
   const res = await fetch(url, {
     redirect: "follow",
     headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; FloorInventory/1.0)",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
       Accept: "text/html,application/json",
       "Accept-Language": "en-US,en;q=0.9",
       ...headers,
@@ -71,6 +71,19 @@ function extractMeta(text, prop) {
   return clean(m?.[1]?.replace(/&amp;/g, "&").replace(/&quot;/g, '"'));
 }
 
+function productImage(raw) {
+  if (typeof raw !== "string") return "";
+  const url = raw.replace(/&amp;/g, "&").replace(/\\u0026/g, "&").split("?")[0];
+  if (!/^https:\/\//i.test(url)) return "";
+  if (!/costco|scene7|gdx-assets|example\.com/i.test(url)) return "";
+  if (/instacart|customer-service|privacy|favicon|logo|sprite|icon/i.test(url)) return "";
+  return url;
+}
+
+function scoreProductImage(url) {
+  return /\/\d{5,}_/.test(url) ? 1 : 0;
+}
+
 function parseCostcoHtml(text, itemNumber, url) {
   if (!text || blockedHtml(text)) return emptyCostco({ raw_error: "costco_blocked", item_number: itemNumber });
   const title =
@@ -78,6 +91,10 @@ function parseCostcoHtml(text, itemNumber, url) {
     clean((text.match(/<title>([^<]+)<\/title>/i) || [])[1]?.replace(/\s*\|\s*Costco.*$/i, ""));
   const description = extractMeta(text, "og:description") || extractMeta(text, "description");
   const image = extractMeta(text, "og:image");
+  const images = [...new Set([
+    image,
+    ...[...text.matchAll(/https:\/\/[^"'\\\s>]+\.(?:jpe?g|png|webp|avif)(?:\?[^"'\\\s>]*)?/gi)].map((match) => match[0]),
+  ].map(productImage).filter(Boolean))].sort((a, b) => scoreProductImage(b) - scoreProductImage(a)).slice(0, 8);
   const brand =
     clean((text.match(/"brand"\s*:\s*\{\s*"@type"\s*:\s*"Brand"\s*,\s*"name"\s*:\s*"([^"]+)"/i) || [])[1]) ||
     clean((text.match(/"brand"\s*:\s*"([^"]+)"/i) || [])[1]);
@@ -93,13 +110,62 @@ function parseCostcoHtml(text, itemNumber, url) {
     model,
     description,
     features: [],
-    images: image ? [image] : [],
+    images,
     package: { length_in: null, width_in: null, height_in: null, weight_lb: null },
     manufacturer_upc,
     item_number: itemNumber || null,
     url,
     source: "costco",
   };
+}
+
+/** Fetch one Costco product page and pull its gallery. */
+export async function costcoFromUrl(url, { fetchImpl } = {}) {
+  const page = String(url || "");
+  if (!/^https:\/\/([a-z0-9-]+\.)?costco\.(com|ca)\//i.test(page)) return emptyCostco({ raw_error: "costco_url_rejected", url: page });
+  const doFetch = fetchImpl || fetchText;
+  try {
+    const { res, text } = await doFetch(page);
+    if (res.status === 429) return emptyCostco({ raw_error: "costco_rate_limited", url: res.url || page });
+    return parseCostcoHtml(text, "", res.url || page);
+  } catch (e) {
+    return emptyCostco({ raw_error: e?.name === "TimeoutError" ? "costco_timeout" : "costco_fetch_failed", url: page });
+  }
+}
+
+/**
+ * The item-number URL often is not the product page. Search for that exact
+ * number and open the Costco page whose sku matches it.
+ */
+export async function costcoByItemSearch(itemNumber, { fetchImpl } = {}) {
+  const id = String(itemNumber || "").replace(/\D/g, "");
+  if (!id) return emptyCostco({ raw_error: "costco_item_required" });
+  const doFetch = fetchImpl || ((url) => fetchText(url, { "User-Agent": "Mozilla/5.0" }));
+  const load = async (url) => {
+    let last = { res: { status: 0, url }, text: "" };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try { last = await doFetch(url); } catch { continue; }
+      if (last.text) return last;
+    }
+    return last;
+  };
+  try {
+    const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(`site:costco.com ${id}`)}`;
+    const { text } = await load(searchUrl);
+    if (!text.includes("uddg=")) return emptyCostco({ raw_error: "costco_search_failed", item_number: id });
+    const links = [...new Set([...text.matchAll(/uddg=([^&"]+)/g)].map((match) => {
+      try { return decodeURIComponent(match[1]); } catch { return ""; }
+    }).filter((url) => /^https:\/\/www\.costco\.com\/p\//i.test(url)))].slice(0, 4);
+    for (const page of links) {
+      const loaded = await load(page);
+      if (!loaded.text.includes(`"sku":"${id}"`)) continue;
+      const parsed = parseCostcoHtml(loaded.text, id, loaded.res.url || page);
+      if (parsed.images?.length) return parsed;
+    }
+  } catch {
+    return emptyCostco({ raw_error: "costco_search_failed", item_number: id });
+  }
+  return emptyCostco({ raw_error: "costco_not_found", item_number: id });
 }
 
 /** Best-effort Costco.com fetch by warehouse item number. */

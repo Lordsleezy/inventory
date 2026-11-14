@@ -68,7 +68,7 @@ export function mapFloorCondition(floorGrade, allowed) {
     );
   }
 
-  if (grade.includes("part")) {
+  if (grade.includes("part") || grade.includes("defect") || grade.includes("not working")) {
     return (
       byName(list, (n) => n.includes("for parts") || n.includes("not working")) ||
       byId(list, PARTS_IDS)

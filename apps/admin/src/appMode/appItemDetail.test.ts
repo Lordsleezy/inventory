@@ -7,10 +7,10 @@ import path from 'node:path';
 const root = path.dirname(fileURLToPath(import.meta.url));
 const source = () => readFile(path.join(root, 'AppItemDetail.tsx'), 'utf8');
 
-test('phone item page hides marketplaces and shipping from clerks and keeps attention UPC/location', async () => {
+test('phone item page hides marketplaces and shipping from clerks and keeps the UPC attention', async () => {
   const file = await source();
   assert.match(file, /app-item-attention/);
-  assert.match(file, /Set location/);
+  assert.doesNotMatch(file, /Set location/);
   assert.match(file, /Add UPC/);
   assert.match(file, /staff_set_unit_upc/);
   assert.match(file, /portal_set_unit_upc/);

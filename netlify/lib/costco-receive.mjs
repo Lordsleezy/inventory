@@ -99,8 +99,9 @@ function photosOf(product, amazon) {
 
 /** Stock photos for this manifest line. A fuzzy catalog picture is left out, even when its title repeats the manifest words. */
 export function stockImagesForLine({ enrich = {}, product = null, amazon = null, trusted = false }) {
-  const stored = httpsImages(enrich?.images);
-  const catalog = trusted || amazon?.identifier_match === true ? photosOf(product, amazon) : [];
+  const rejected = new Set((enrich?.rejected_images || []).filter((url) => typeof url === "string"));
+  const stored = httpsImages(enrich?.images).filter((url) => !rejected.has(url));
+  const catalog = (trusted || amazon?.identifier_match === true ? photosOf(product, amazon) : []).filter((url) => !rejected.has(url));
   return [...new Set([...stored, ...catalog])].slice(0, 6);
 }
 
@@ -441,6 +442,18 @@ function sameTitle(a, b) {
 async function remember(sb, storeId, key, book, item, patch) {
   const next = { ...book, [item]: { ...(book[item] || {}), ...patch, at: new Date().toISOString() } };
   await sb.from("store_settings").upsert({ store_id: storeId, key, value: next }, { onConflict: "store_id,key" });
+}
+
+export async function rejectManifestStockPhoto(sb, storeId, { itemNumber, url, replacement = "" }) {
+  const found = await findManifestLine(sb, storeId, itemNumber);
+  if (!found.line) throw Object.assign(new Error("That item is not on a manifest"), { status: 404 });
+  const ctx = await loadContext(sb, storeId, found.line);
+  const item = String(found.line.tcin || "");
+  const entry = ctx.book?.[item] || ctx.enrich || {};
+  const rejected = [...new Set([...(entry.rejected_images || []), url].filter((row) => typeof row === "string" && row !== replacement))].slice(0, 20);
+  const images = [...new Set([replacement, ...(entry.images || [])].filter((row) => typeof row === "string" && row && row !== url && !rejected.includes(row)))].slice(0, 4);
+  await remember(sb, storeId, ctx.key, ctx.book || {}, item, { images, rejected_images: rejected });
+  return { ok: true, images };
 }
 
 export async function pinCostcoVariant(sb, storeId, { code, title, itemNumber }, deps = {}) {

@@ -23,6 +23,9 @@ import {
   listingTitle,
   saveFloorProduct,
 } from "../lib/floor-products.mjs";
+import { judgeStockPhoto, keepStockJudgment, sameProductPhotos } from "../lib/stock-photo-verify.mjs";
+import { rejectManifestStockPhoto } from "../lib/costco-receive.mjs";
+import { costcoByItemNumber, costcoByItemSearch } from "../lib/costco-lookup.mjs";
 const receiveModel = () => process.env.GEMINI_RECEIVE_MODEL || 'gemini-3.5-flash-lite';
 const retailModel = () => process.env.GEMINI_RETAIL_MODEL || 'gemini-3.1-flash-lite-preview';
 const STOCK_IMAGE_HOSTS = ['media-amazon.com', 'ssl-images-amazon.com', 'ebayimg.com', 'upcitemdb.com',
@@ -140,6 +143,34 @@ export async function invoke(event) {
 
   const body = JSON.parse(event.body || "{}");
   const ctx = await receiveAccessFromEvent(event, body.store_id);
+  if (body.action === 'compare_stock') {
+    const stockUrl = String(body.stock_url || "");
+    const image = String(body.image_base64 || "");
+    if (!stockUrl || !image) return json(200, { ok: true, same: true });
+    try {
+      const compared = await sameProductPhotos(stockUrl, image, body.mime_type || "image/jpeg", {
+        description: body.title, brand: body.brand, item_number: body.item_number, upc: body.upc,
+        expanded_title: body.title,
+      });
+      let replacement = "";
+      if (compared.same === false && body.item_number) {
+        const identity = { description: body.title, brand: body.brand, item_number: body.item_number, upc: body.upc, expanded_title: compared.visible_text || body.title };
+        try {
+          let costco = await costcoByItemNumber(body.item_number);
+          if (!costco.images?.length) costco = await costcoByItemSearch(body.item_number);
+          for (const candidate of (costco.images || []).slice(0, 4)) {
+            if (candidate === stockUrl) continue;
+            const judgment = await judgeStockPhoto(candidate, identity);
+            if (keepStockJudgment(judgment)) { replacement = candidate; break; }
+          }
+        } catch { /* a failed search leaves the stock photo off */ }
+        await rejectManifestStockPhoto(ctx.sb, ctx.storeId, { itemNumber: body.item_number, url: stockUrl, replacement }).catch(() => undefined);
+      }
+      return json(200, { ok: true, same: compared.same !== false, replacement, reason: compared.reason || "" });
+    } catch {
+      return json(200, { ok: true, same: true });
+    }
+  }
   if (body.action === 'stage_stock_photo') {
     const gtin = normalizeGtin(String(body.upc || '').trim());
     const requestId = String(body.request_id || '');

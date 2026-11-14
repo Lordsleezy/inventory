@@ -12,7 +12,7 @@ select throws_ok(
 select throws_ok(
   $$select public.receive_require_new_item('{"p_condition":"Used - Good"}'::jsonb, '{}'::text[], '{}'::jsonb)$$,
   '22023',
-  'Missing location.'
+  'Missing a photo taken or chosen for this item. A stock photo does not count.'
 );
 
 select throws_ok(
@@ -42,13 +42,13 @@ select lives_ok(
 select lives_ok(
   $$select public.receive_require_new_item(
       '{"p_condition":"Defective/non-sellable"}'::jsonb, '{}'::text[], '{"location":"4-1-3"}'::jsonb)$$,
-  'defective condition waives the photo and the dimensions but still needs location'
+  'defective condition waives the photo and the dimensions'
 );
 
 select lives_ok(
   $$select public.receive_require_new_item(
       '{"p_condition":"Used - Good"}'::jsonb, '{}'::text[], '{"defective":"true","location":"4-1-3"}'::jsonb)$$,
-  'the defective flag waives the photo and the dimensions but still needs location'
+  'the defective flag waives the photo and the dimensions'
 );
 
 select lives_ok(
@@ -56,11 +56,10 @@ select lives_ok(
   'do not list waives condition, location, photo, and dimensions'
 );
 
-select throws_ok(
+select lives_ok(
   $$select public.receive_require_new_item(
       '{"p_condition":"Used - Good"}'::jsonb, '{}'::text[], '{"defective":"true"}'::jsonb)$$,
-  '22023',
-  'Missing location.'
+  'a defective item can be saved with no location'
 );
 
 select * from finish();
