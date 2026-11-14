@@ -327,7 +327,7 @@ export function AppItemDetail({
   const condition = String(unit?.condition || '').trim();
   const testStatus = String(unit?.test_status || '').trim();
   const currentPhoto = photos[photoIndex];
-  const showAttention = inStock && (!hasLocation || !upcSet);
+  const showAttention = inStock && !upcSet;
   const canSetLocation = inStock; // portal_move_location_stock + portal_bay_list work via current_store_id
   const canEditUpc = inStock;
 
@@ -588,19 +588,6 @@ export function AppItemDetail({
 
           {showAttention && (
             <div className="app-item-attention" aria-label="Needs attention">
-              {!hasLocation && (
-                <div className="app-item-attention-row">
-                  <div className="app-item-attention-copy">
-                    <span>Location</span>
-                    <strong>Not assigned</strong>
-                  </div>
-                  {canSetLocation && (
-                    <button type="button" className="app-item-btn-solid" onClick={() => setLocationOpen(true)}>
-                      Set location
-                    </button>
-                  )}
-                </div>
-              )}
               {!upcSet && (
                 <div className={`app-item-attention-row${upcEditing ? ' is-editing' : ''}`}>
                   {!upcEditing ? (

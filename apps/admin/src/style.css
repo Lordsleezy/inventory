@@ -625,7 +625,7 @@ html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 .receive-step-top{flex:none;display:flex;justify-content:space-between;align-items:center;min-height:48px;padding:calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;background:#000}
 .receive-step-top button,.receive-steps button,.receive-steps input:not([type=file]):not([type=radio]):not([type=checkbox]){background:#000;color:#fff;border:1px solid #fff;border-radius:0;padding:10px 12px;font:inherit}
 .receive-steps button:disabled{color:#9a9a9a;border-color:#4a4a4a}
-.receive-steps button.is-on,.receive-step-picks button.is-on{background:#fff;color:#000}
+.receive-steps button.is-on{background:#000;color:#fff;border-color:#fff;font-weight:700}
 .receive-step{flex:1;min-height:0;display:flex;flex-direction:column;padding:16px 16px 0;overflow:auto}
 .receive-step-main{flex:1;overflow:auto;display:grid;gap:12px;align-content:start}
 .receive-step h2{font-size:22px;margin:0}
@@ -634,13 +634,28 @@ html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 .receive-step-nav{flex:none;display:flex;gap:16px;margin:auto -16px 0;padding:12px 16px;background:#000;position:sticky;bottom:0}
 .receive-step-nav button{flex:1;min-height:48px}
 .receive-step-nav.is-stack{flex-direction:column}
+.receive-steps .receive-step-label{margin:12px 0 0;color:#9a9a9a;font-size:13px}
 .receive-step-picks{display:flex;flex-wrap:wrap;gap:8px}
+.receive-steps .receive-step-picks button{flex:0 0 auto;min-height:36px;padding:6px 10px;background:#000;color:#9a9a9a;border:1px solid #4a4a4a;font-weight:500}
+.receive-steps .receive-step-picks button.is-on{color:#fff;border-color:#fff;font-weight:700;background:#000}
+.receive-steps .receive-step-picks button.is-on::before{content:"✓ "}
 .receive-step-choice{display:flex;gap:10px;align-items:center;padding:8px 0;min-height:44px}
 .receive-step > label:not(.receive-step-choice):not(.receive-photo-take):not(.receive-photo-library){display:grid;gap:6px;margin-top:8px}
 .receive-step input:not([type=file]):not([type=radio]):not([type=checkbox]){width:100%;box-sizing:border-box;min-height:48px;font-size:16px}
-.receive-photo-take,.receive-photo-library{position:relative;display:flex;align-items:center;justify-content:center;width:100%;border:1px solid #fff;background:#000;color:#fff;font-weight:700;min-height:64px}
+.receive-photo-take,.receive-photo-library{position:relative;display:flex;align-items:stretch;justify-content:center;width:100%;box-sizing:border-box;border:1px solid #fff;background:#000;color:#fff;font-weight:700;min-height:64px;margin:0 0 8px}
 .receive-photo-library{min-height:44px;font-weight:400}
-.receive-photo-take input,.receive-photo-library input{position:absolute;inset:0;width:100%;height:100%;opacity:.02;font-size:16px;cursor:pointer}
+.receive-photo-take span,.receive-photo-library span{position:relative;z-index:2;pointer-events:none;display:flex;align-items:center;justify-content:center;width:100%;background:#000}
+.receive-photo-take input,.receive-photo-library input{position:absolute;inset:0;z-index:1;width:100%;height:100%;margin:0;padding:0;opacity:.02;font-size:16px;color:transparent;background:transparent;border:0;cursor:pointer}
+.receive-stock-wrap{margin:0;display:grid;gap:8px}
+.receive-stock-wrap button{justify-self:start}
+.receive-review-sku{margin:0}
+.receive-review-sku strong{display:block;font-size:40px;line-height:1}
+.receive-review-photos{display:flex;gap:8px}
+.receive-review-photos button{width:72px;height:72px;padding:0;border:1px solid #fff;background:#000}
+.receive-review-photos img{width:100%;height:100%;object-fit:cover}
+.receive-steps .receive-review-row{display:flex;justify-content:space-between;gap:12px;width:100%;min-height:0;background:transparent;border:0;border-bottom:1px solid #2a2a2a;border-radius:0;padding:12px 0;text-align:left}
+.receive-steps .receive-review-row span{color:#9a9a9a}
+.receive-saved{position:fixed;inset:0;z-index:60;display:grid;place-items:center;margin:0;background:#000;color:#fff;font-size:28px;font-weight:700}
 .receive-stock{width:100%;max-height:240px;object-fit:contain;background:#000}
 .receive-steps .manifest-receive-reference span{display:block;color:#e10600;font-weight:700}
 html.app-mode .receive-chip{border-radius:0!important;background:#000!important;color:#fff!important;border:1px solid #fff!important}

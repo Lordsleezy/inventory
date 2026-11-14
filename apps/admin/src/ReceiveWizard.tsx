@@ -12,6 +12,7 @@ const CONDITIONS: [string, string][] = [
   ['Open box', 'Open box'],
   ['Used - Good', 'Used · Good'],
   ['Used - Fair', 'Used · Fair'],
+  ['Defective', 'Defective'],
 ];
 
 type FormSlice = {
@@ -23,13 +24,14 @@ type Stock = { sku: string; title: string; quantity: number; condition: string |
 
 export function ReceiveWizard({
   client, storeId, accessToken, staffMode,
-  lookupId, lookupStatus, miss, title, brand, details, source, stockUrl, retailCents, manifestReference,
+  lookupId, lookupStatus, miss, title, brand, details, source, stockUrl, onWrongPhoto, retailCents, manifestReference,
   form, update, doNotList, setDoNotList,
   hasPhoto, photoPreviews = [], onPhoto, onIdentify,
   locations, location, setLocation,
   stockMatches, onAddToStock, addingToStock,
   ebayAspects, setEbayAspects, needsSpecifics,
   busy, error, onSave, onCancel, onClear, onScan, onReject, onAccept,
+  nextSku = '', upc = '', category = '', savedNotice = '',
   entry = 'scan', holdForLookup = false,
 }: {
   client: SupabaseClient;
@@ -44,6 +46,7 @@ export function ReceiveWizard({
   details: string;
   source: string;
   stockUrl: string;
+  onWrongPhoto?: () => void;
   retailCents: number | null;
   manifestReference: ReturnType<typeof useManifestReceiveReference>;
   form: FormSlice;
@@ -73,13 +76,19 @@ export function ReceiveWizard({
   onAccept: () => void | Promise<void>;
   entry?: 'scan' | 'identify';
   holdForLookup?: boolean;
+  nextSku?: string;
+  upc?: string;
+  category?: string;
+  savedNotice?: string;
 }) {
   const [step, setStep] = useState<ReceiveStepId | 'scan' | 'lookup' | 'identify'>(
     entry === 'identify' ? 'identify' : (holdForLookup ? 'lookup' : 'scan'),
   );
   const [bay, setBay] = useState<number | null>(null);
   const [row, setRow] = useState<number | null>(null);
+  const [noLocation, setNoLocation] = useState(false);
   const seen = useRef<string | null>(null);
+  const returnToReview = useRef(false);
 
   const plan = useMemo(() => receiveStepPlan({
     doNotList,
@@ -104,7 +113,17 @@ export function ReceiveWizard({
     setStep(miss && !title ? 'identify' : 'confirm');
   }, [lookupId, lookupStatus, miss, title, entry, holdForLookup]);
 
+  function edit(next: ReceiveStepId) {
+    returnToReview.current = true;
+    setStep(next);
+  }
+
   function go(delta: number) {
+    if (returnToReview.current && step !== 'review') {
+      returnToReview.current = false;
+      setStep('review');
+      return;
+    }
     if (step === 'confirm' && delta < 0) { onClear(); return; }
     if (delta > 0 && step === 'brand' && !form.brand.trim()) return;
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
@@ -115,8 +134,18 @@ export function ReceiveWizard({
   }
 
   const bays = [...new Map(locations.map(item => [item.bay_no, item])).values()];
-  const rows = [...new Set(locations.filter(item => item.bay_no === bay).map(item => item.row_no))].filter((value): value is number => value != null);
-  const bins = locations.filter(item => item.bay_no === bay && item.row_no === row);
+  const baySpots = locations.filter(item => item.bay_no === bay);
+  const rows = [...new Set(baySpots.map(item => item.row_no))].filter((value): value is number => value != null);
+  const bins = baySpots.filter(item => item.row_no === row);
+  const simpleBay = baySpots.length === 1;
+  function pickBay(item: LocationChoice) {
+    setNoLocation(false);
+    setBay(item.bay_no ?? null);
+    setRow(null);
+    const spots = locations.filter(spot => spot.bay_no === item.bay_no);
+    if (spots.length === 1) setLocation(spots[0].code);
+    else setLocation('');
+  }
 
   const retail = retailCents != null ? `$${(retailCents / 100).toFixed(2)}` : '';
   const nav = (
@@ -146,7 +175,12 @@ export function ReceiveWizard({
       {step === 'confirm' && (
         <div className="receive-step">
           <div className="receive-step-main">
-            {stockUrl ? <img className="receive-stock" src={stockUrl} alt="Stock photo" /> : <p>No stock photo</p>}
+            {stockUrl ? (
+              <figure className="receive-stock-wrap">
+                <img className="receive-stock" src={stockUrl} alt="Stock photo" />
+                <button type="button" onClick={onWrongPhoto}>Wrong photo</button>
+              </figure>
+            ) : <p>No stock photo</p>}
             <h2>{title || 'Unknown item'}</h2>
             <p>{[brand, details].filter(Boolean).join(' · ')}</p>
             <p className={manifestReference?.reference ? 'manifest-receive-reference' : undefined}>
@@ -165,14 +199,21 @@ export function ReceiveWizard({
         <div className="receive-step">
           <div className="receive-step-main">
             <h2>Take a real photo <span className="receive-step-req">*</span></h2>
-            {stockUrl && <img className="receive-stock" src={stockUrl} alt="Stock photo" />}
+            {stockUrl && (
+              <figure className="receive-stock-wrap">
+                <img className="receive-stock" src={stockUrl} alt="Stock photo" />
+                <button type="button" onClick={onWrongPhoto}>Wrong photo</button>
+              </figure>
+            )}
             {stockUrl && <p>Stock photo saved. You still need your own photo.</p>}
             {photoPreviews.map(url => <img key={url} className="receive-stock" src={url} alt="Your photo" />)}
-            <label className="receive-photo-take">{hasPhoto ? 'Take another' : 'Take photo'}
+            <label className="receive-photo-take">
               <input type="file" accept="image/*" capture="environment" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onPhoto(file); }} />
+              <span>{hasPhoto ? 'Take another' : 'Take photo'}</span>
             </label>
-            <label className="receive-photo-library">Choose from library
+            <label className="receive-photo-library">
               <input type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onPhoto(file); }} />
+              <span>Choose from library</span>
             </label>
           </div>
           <div className="receive-step-nav">
@@ -262,41 +303,71 @@ export function ReceiveWizard({
       )}
       {step === 'location' && (
         <div className="receive-step">
-          <h2>Location <span className="receive-step-req">*</span></h2>
-          <div className="receive-step-picks">
-            {bays.map(item => (
-              <button type="button" key={item.bay_no} className={bay === item.bay_no ? 'is-on' : ''} onClick={() => { setBay(item.bay_no ?? null); setRow(null); }}>{item.bay_name || `Bay ${item.bay_no}`}</button>
-            ))}
+          <h2>Location</h2>
+          <div className="receive-step-main">
+            <p className="receive-step-label">Bay</p>
+            <div className="receive-step-picks">
+              <button type="button" className={noLocation ? 'is-on' : ''} onClick={() => { setNoLocation(true); setBay(null); setRow(null); setLocation(''); }}>No location</button>
+              {bays.map(item => (
+                <button type="button" key={item.bay_no} className={!noLocation && bay === item.bay_no ? 'is-on' : ''} onClick={() => pickBay(item)}>{item.bay_name || `Bay ${item.bay_no}`}</button>
+              ))}
+            </div>
+            {bay != null && !simpleBay && (
+              <>
+                <p className="receive-step-label">Row</p>
+                <div className="receive-step-picks">
+                  {rows.map(value => <button type="button" key={value} className={row === value ? 'is-on' : ''} onClick={() => { setRow(value); setLocation(''); }}>R{value}</button>)}
+                </div>
+              </>
+            )}
+            {row != null && (
+              <>
+                <p className="receive-step-label">Bin</p>
+                <div className="receive-step-picks">
+                  {bins.map(item => (
+                    <button type="button" key={item.code} className={location === item.code ? 'is-on' : ''} onClick={() => setLocation(item.code)}>{item.bin_no == null ? 'No bin' : `B${item.bin_no}`}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            <p><strong>{noLocation ? 'No location' : location ? locationMenuLabel(locations.find(item => item.code === location) || { code: location }) : 'Pick a bay'}</strong></p>
           </div>
-          {bay != null && <div className="receive-step-picks">
-            {rows.map(value => <button type="button" key={value} className={row === value ? 'is-on' : ''} onClick={() => setRow(value)}>R{value}</button>)}
-          </div>}
-          {row != null && <div className="receive-step-picks">
-            {bins.map(item => (
-              <button type="button" key={item.code} className={location === item.code ? 'is-on' : ''} onClick={() => setLocation(item.code)}>{item.bin_no == null ? 'No bin' : `B${item.bin_no}`}</button>
-            ))}
-          </div>}
-          {location && <p><strong>{locationMenuLabel(locations.find(item => item.code === location) || { code: location })}</strong></p>}
           <div className="receive-step-nav">
             <button type="button" onClick={() => go(-1)}>Back</button>
-            <button type="button" disabled={!location} onClick={() => setStep('review')}>Next</button>
+            <button type="button" disabled={!noLocation && !location} onClick={() => setStep('review')}>Next</button>
           </div>
         </div>
       )}
       {step === 'review' && (
         <div className="receive-step">
-          <h2>Review</h2>
-          <p><strong>{form.title || title}</strong></p>
-          <p>{form.unbranded ? 'Unbranded' : (form.brand || brand)}</p>
-          <p>{form.condition || 'No condition'}{doNotList ? ' · Do not list' : ''}</p>
-          {!doNotList && <p>{form.ask ? `$${form.ask}` : 'No price'} · qty {form.quantity || '1'}</p>}
-          <p>{[form.length, form.width, form.height].filter(Boolean).join(' × ')} in · {form.weight} lb</p>
-          <p>{locationMenuLabel(locations.find(item => item.code === location) || { code: location })}</p>
-          <p>{hasPhoto ? '1 photo' : 'No photo yet'}</p>
+          <div className="receive-step-main">
+            <p className="receive-review-sku"><span>SKU</span><strong>{nextSku || '…'}</strong></p>
+            <div className="receive-review-photos">
+              {photoPreviews.map(url => <button type="button" key={url} onClick={() => edit('photo')}><img src={url} alt="Your photo" /></button>)}
+              {stockUrl && <button type="button" onClick={() => edit('photo')}><img src={stockUrl} alt="Stock photo" /></button>}
+            </div>
+            {([
+              ['UPC', upc || '—', 'confirm'],
+              ['Brand', form.unbranded ? 'Unbranded' : (form.brand || brand || '—'), 'brand'],
+              ['Category', doNotList ? '' : (category || '—'), 'category'],
+              ['Condition', `${form.condition || '—'}${doNotList ? ' · Do not list' : ''}`, 'condition'],
+              ['Price', doNotList ? '' : (form.ask ? `$${form.ask}` : '—'), 'price'],
+              ['Quantity', doNotList ? '' : (form.quantity || '1'), 'price'],
+              ['Box', doNotList ? '' : ([form.length, form.width, form.height].every(value => Number(value) > 0) ? `${form.length} × ${form.width} × ${form.height} in` : '—'), 'dims'],
+              ['Weight', doNotList ? '' : (Number(form.weight) > 0 ? `${form.weight} lb` : '—'), 'dims'],
+              ['Location', noLocation || !location ? 'No location' : locationMenuLabel(locations.find(item => item.code === location) || { code: location }), 'location'],
+              ['Photos', hasPhoto ? String(photoPreviews.length || 1) : '—', 'photo'],
+            ] as [string, string, ReceiveStepId][]).filter(([, value]) => value).map(([label, value, target]) => (
+              <button type="button" key={label} className="receive-review-row" onClick={() => edit(target)}>
+                <span>{label}</span><strong>{value}</strong>
+              </button>
+            ))}
+          </div>
           <div className="receive-step-nav">
             <button type="button" onClick={() => setStep('location')}>Back</button>
-            <button type="button" disabled={busy || !hasPhoto || !location || (!doNotList && !form.ask.trim())} onClick={onSave}>{busy ? 'Saving…' : 'Save & scan next'}</button>
+            <button type="button" disabled={busy || !hasPhoto || (!doNotList && !form.ask.trim())} onClick={onSave}>{busy ? 'Saving…' : 'Save & scan next'}</button>
           </div>
+          {savedNotice && <p className="receive-saved" role="status">Saved · SKU {savedNotice}</p>}
         </div>
       )}
     </div>

@@ -9,7 +9,7 @@ import { receiveAccessFromEvent } from "../lib/receive-auth.mjs";
 import { netlifyHandler, floorLog } from "../lib/floor-log.mjs";
 import { lookupUpc } from "../lib/upc-lookup.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
-import { acceptManifestIdentity, attachManifestAlternate, costcoReceiveLookup, pinCostcoVariant, saveCostcoCorrection } from "../lib/costco-receive.mjs";
+import { acceptManifestIdentity, attachManifestAlternate, costcoReceiveLookup, pinCostcoVariant, rejectManifestStockPhoto, saveCostcoCorrection } from "../lib/costco-receive.mjs";
 
 const BATCH_MAX = 100;
 
@@ -72,6 +72,18 @@ async function actions(event, ctx) {
       return json(200, saved);
     } catch (err) {
       return json(err.status || 500, { ok: false, error: err.message || "attach_failed" });
+    }
+  }
+
+  if (action === "reject_stock_photo") {
+    try {
+      const saved = await rejectManifestStockPhoto(ctx.sb, ctx.storeId, {
+        itemNumber: body.item_number,
+        url: body.url,
+      });
+      return json(200, saved);
+    } catch (err) {
+      return json(err.status || 500, { ok: false, error: err.message || "reject_failed" });
     }
   }
 

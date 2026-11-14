@@ -459,7 +459,7 @@ const isDefectiveCondition = (value: string) => value === SCRATCH || value === S
 const CONDITIONS: [string, string][] = [[NEW, 'New (sealed)'], [OPEN, 'Open box'], [USED_GOOD, 'Used · Good'], [USED_FAIR, 'Used · Fair'], [SCRATCH, 'Defective/non-sellable']];
 /** Receive chips for clerks — Defective stays under Flags, not as a condition radio. */
 const RECEIVE_CONDITION_CHIPS: [string, string][] = [[NEW, 'New'], [OPEN, 'Open box'], [USED_GOOD, 'Used · Good'], [USED_FAIR, 'Used · Fair']];
-const isFloorReceiveCondition = (value: string) => RECEIVE_CONDITION_CHIPS.some(([v]) => v === value) || isDefectiveCondition(value);
+const isFloorReceiveCondition = (value: string) => value === 'Defective' || RECEIVE_CONDITION_CHIPS.some(([v]) => v === value) || isDefectiveCondition(value);
 const HOLD_REASONS: [string, string][] = [
   ['damaged', 'Damaged'], ['needs_testing', 'Needs testing'], ['keep_in_store', 'Keep in store'], ['other', 'Other'],
 ];
@@ -650,6 +650,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [form, setForm] = useState<Form>(blank);
   const [files, setFiles] = useState<File[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
+  const [savedNotice, setSavedNotice] = useState('');
   const [manifestId, setManifestId] = useState('');
   const [stockMatches, setStockMatches] = useState<StockMatch[]>([]);
   const [selectedStockMatch, setSelectedStockMatch] = useState<StockMatch | null>(null);
@@ -1450,7 +1451,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const photo = personPhotoReady();
     const quantityOk = Number(form.quantity) >= 1;
     const hasDimensions = dimensionsReady();
-    const hasLocation = Boolean(selectedLocation.trim());
+    const hasLocation = appChrome || Boolean(selectedLocation.trim());
     if (doNotList) {
       return receiveMissingFields({
         doNotList: true,
@@ -1581,7 +1582,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
           ebay_category_id: doNotList ? null : ebayAspects.categoryId,
           ebay_attributes: doNotList ? {} : ebayAspects.attributes,
-          ebay_condition_id: doNotList ? null : (ebayAspects.allowedGrades || []).find(grade => grade.grade === form.condition)?.conditionId || null,
+          ebay_condition_id: doNotList ? null : (ebayAspects.allowedGrades || []).find(grade => grade.grade === (form.condition === 'Defective' ? 'For parts' : form.condition))?.conditionId || null,
           photo_identity_confirmed: photoTitleConfirmed,
           photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
       });
@@ -1651,6 +1652,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         setChannels([]);
         setDoNotList(false); setDns(false);
       } else {
+        if (appChrome && skus[0]) {
+          setSavedNotice(skus[0]);
+          await new Promise(resolve => setTimeout(resolve, 900));
+          setSavedNotice('');
+        }
         const doneId = current?.id;
         setQueue(q => q.filter(s => s.id !== doneId));
         setLoadedId(null);
@@ -2207,6 +2213,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         entry={initialEntry === 'identify' ? 'identify' : 'scan'}
         holdForLookup={Boolean(initialUpc) && initialEntry !== 'identify'}
         stockUrl={stockPhotoUrls[0]?.url || ''}
+        onWrongPhoto={() => {
+          const url = stockPhotoUrls[0]?.url;
+          const item = result?.receive?.item_number;
+          setStockPhotoUrls(list => list.slice(1));
+          if (!url || !item) return;
+          void fetch(floorFunctionUrl('upc-lookup'), {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'reject_stock_photo', store_id: storeId, item_number: item, url }),
+          });
+        }}
         retailCents={result?.receive?.manifest_retail_cents ?? null}
         manifestReference={manifestReference}
         form={form}
@@ -2214,7 +2231,32 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         doNotList={doNotList} setDoNotList={setDoNotList}
         hasPhoto={files.length > 0 || stagedPhotoPaths.length > 0}
         photoPreviews={previews}
-        onPhoto={file => { const list = new DataTransfer(); list.items.add(file); void ingestFiles(list.files); }}
+        onPhoto={file => {
+          const list = new DataTransfer();
+          list.items.add(file);
+          void ingestFiles(list.files);
+          const stock = stockPhotoUrls[0]?.url;
+          const item = result?.receive?.item_number;
+          if (!stock || !item) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const data = String(reader.result || '');
+            const image = data.slice(data.indexOf(',') + 1);
+            void fetch(floorFunctionUrl('receive-photo-identify'), {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+              body: JSON.stringify({
+                action: 'compare_stock', store_id: storeId, stock_url: stock, image_base64: image,
+                mime_type: file.type || 'image/jpeg', item_number: item, upc: current?.upc || '',
+                title: text(result?.merged?.title), brand: text(result?.merged?.brand),
+              }),
+            }).then(async response => {
+              const json = await response.json().catch(() => ({}));
+              if (json.same === false) setStockPhotoUrls(json.replacement ? [{ url: json.replacement, source: 'catalog' }] : list => list.filter(photo => photo.url !== stock));
+            }).catch(() => undefined);
+          };
+          reader.readAsDataURL(file);
+        }}
         onIdentify={file => identifyMissPhoto(file)}
         locations={receiveLocations} location={selectedLocation} setLocation={setSelectedLocation}
         stockMatches={stockMatches}
@@ -2223,6 +2265,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         ebayAspects={ebayAspects} setEbayAspects={setEbayAspects}
         needsSpecifics={missingEbayAspects(ebayAspects.fields, ebayAspects.attributes, ebayAspects.na).length > 0}
         busy={busy} error={error || photoIdError}
+        nextSku={options?.next_sku || ''}
+        upc={form.upc || current?.upc || ''}
+        category={ebayAspects.path || ''}
+        savedNotice={savedNotice}
         onSave={() => { void finish(undefined, true); }}
         onCancel={() => onAppCancel?.()}
         onClear={() => { setQueue([]); setPhotoCandidate(null); setFiles([]); setError(''); }}

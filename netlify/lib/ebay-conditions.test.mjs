@@ -36,6 +36,7 @@ test("appliance categories map Floor grades onto New / Open box / Used / For par
   assert.equal(mapFloorCondition("Fair", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("Used - Fair", APPLIANCE).conditionId, "3000");
   assert.equal(mapFloorCondition("For parts", APPLIANCE).conditionId, "7000");
+  assert.equal(mapFloorCondition("Defective", APPLIANCE).conditionId, "7000");
 });
 
 test("used and defective Floor grades never map to New, Open box, or Refurbished", () => {
