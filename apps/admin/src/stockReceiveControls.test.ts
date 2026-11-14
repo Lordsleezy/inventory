@@ -23,6 +23,8 @@ test('receive matching popup shows field differences and lets a clerk add to sto
   assert.match(picker, /Choose this SKU/);
   assert.match(picker, /Price differs/);
   assert.match(picker, /Condition differs/);
+  assert.match(picker, /picked\.is_stocked\|\|picked\.can_convert/);
+  assert.doesNotMatch(picker, /only an admin can convert/);
   assert.match(picker, /No, create a new SKU/);
   assert.match(migration, /public\.portal_receive_stock_match/);
   assert.match(migration, /'location',coalesce\(loc\.locations,''\),'photo',ph\.path/);

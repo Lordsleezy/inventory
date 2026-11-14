@@ -2398,7 +2398,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       {!unifiedV2 && <ReceiveQuantity value={form.quantity} onChange={value=>update('quantity',value)} disabled={busy} />}
       {stockMatches.length > 0 && <div className="receive-dup" role="status"><strong>Matching inventory</strong>{stockMatches.map(match => <p key={match.sku}>{match.title} · SKU {match.sku} · {match.quantity} on hand · {match.condition || 'condition unset'}{match.is_stocked
         ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>{selectedStockMatch?.sku === match.sku ? 'Selected' : 'Add to this SKU'}</button></>
-        : match.can_convert && !staffMode ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Convert to stocked SKU and add</button></>
+        : match.can_convert ? <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Convert to stocked SKU and add</button></>
           : <> <button type="button" disabled={busy} onClick={() => setSelectedStockMatch(match)}>Different item, new SKU</button></>}</p>)}
         {selectedStockMatch && <div><p>SKU {selectedStockMatch.sku} goes to {selectedStockMatch.quantity + Number(form.quantity || 0)} on hand.</p><button type="button" disabled={busy} onClick={() => void addToExistingStock(selectedStockMatch)}>Add {Number(form.quantity || 0)} to SKU {selectedStockMatch.sku}</button><button type="button" className="secondary" onClick={() => setSelectedStockMatch(null)}>Different item, new SKU</button></div>}
         <small>Matches require the same UPC (or exact no-UPC title), price and condition.</small></div>}
