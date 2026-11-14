@@ -115,7 +115,15 @@ async function handle(event) {
     await floorLog({
       level: "error", event: "client.error", source: "admin-ui", storeId, sku: body.sku ? String(body.sku).slice(0, 40) : undefined,
       message: String(body.message || "browser error").slice(0, 500),
-      detail: redact({ actor, page: body.page, url: body.url, status: body.status ?? null, traceId: body.traceId ?? null, action: body.action_name ?? null, ua: String(event.headers?.["user-agent"] || "").slice(0, 160) }),
+      detail: redact({
+        actor, page: body.page, url: body.url, status: body.status ?? null, traceId: body.traceId ?? null,
+        action: body.action_name ?? null,
+        stack: body.stack ? String(body.stack).slice(0, 2000) : null,
+        screen: body.screen ? String(body.screen).slice(0, 200) : null,
+        build: body.build ? String(body.build).slice(0, 80) : null,
+        device: body.device ? String(body.device).slice(0, 300) : null,
+        ua: String(event.headers?.["user-agent"] || "").slice(0, 160),
+      }),
     });
     return json(200, { ok: true });
   }

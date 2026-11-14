@@ -11,7 +11,9 @@ type Line = {
   manifest_brand: string;
   alternate_upcs: string[] | null;
   catalog_title: string | null;
+  expanded_title: string | null;
   catalog_brand: string | null;
+  expanded_brand: string | null;
   category: string | null;
   has_dims: boolean;
   has_photo: boolean;
@@ -22,8 +24,8 @@ type Line = {
 
 function missingOf(line: Line) {
   const missing: string[] = [];
-  if (!(line.gtin_match && line.catalog_title)) missing.push('title');
-  if (!(line.catalog_brand || line.manifest_brand)) missing.push('brand');
+  if (!(line.gtin_match && line.catalog_title) && !line.expanded_title) missing.push('title');
+  if (!(line.catalog_brand || line.manifest_brand || line.expanded_brand)) missing.push('brand');
   if (!line.category) missing.push('category');
   if (!line.has_specifics) missing.push('specifics');
   if (!line.has_dims) missing.push('dims');

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { displayProductTitle } from '@floor/store';
 import { ReceivePanel } from '../ReceivePanel';
+import { ManifestSearchBox } from '../ManifestSearchBox';
 import { BundleReceive } from '../BundleReceive';
 import { AppItemDetail } from './AppItemDetail';
 import { ReceiveWorkStatus } from '../ReceiveWorkStatus';
@@ -32,6 +33,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
     }));
   }, [phase]);
   const [manual, setManual] = useState(false);
+  const [entry, setEntry] = useState<'scan' | 'identify'>('scan');
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
   const [nextSku, setNextSku] = useState<string | null>(null);
   const [today, setToday] = useState<{ sku: string; title: string; location: string; at: string }[]>([]);
@@ -91,9 +93,12 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
           }}
           appChrome
           initialManual={manual}
+          initialEntry={entry}
           initialUpc={pendingUpc}
           onAppCancel={() => {
             setPendingUpc(null);
+            setManual(false);
+            setEntry('scan');
             setPhase('home');
           }}
         />
@@ -115,22 +120,25 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
   }
 
   return (
-    <>
-      <div className="app-large-title app-receive-title">
-        <h1>Receive</h1>
-      </div>
-      <p className="rcv-ready">Scanner ready · Next SKU {nextSku || '…'}</p>
-      <form className="rcv-home-scan" onSubmit={(e) => { e.preventDefault(); const code = scanRef.current?.value.trim(); if (code) { setPendingUpc(code); openForm(false); } else openForm(false); }}>
-        <input ref={scanRef} placeholder="Scan or type a barcode" autoComplete="off" enterKeyHint="go" inputMode="text" />
-        <button type="submit">Go</button>
+    <div className="receive-home">
+      <h1>Receive</h1>
+      <p>Next SKU <strong>{nextSku || '…'}</strong></p>
+      <button type="button" onClick={() => { setEntry('scan'); openForm(false); }}>Scan</button>
+      <form onSubmit={(e) => { e.preventDefault(); const code = scanRef.current?.value.trim(); if (!code) return; setEntry('scan'); setPendingUpc(code); openForm(false); }}>
+        <label>Type UPC
+          <input ref={scanRef} aria-label="Type UPC" placeholder="Type the digits" autoComplete="off" enterKeyHint="go" inputMode="numeric" />
+        </label>
+        <button type="submit">Look up</button>
       </form>
-
-      <div className="rcv-home-actions">
-        {/* Input must receive the tap itself — programmatic .click() is blocked on iOS PWA. */}
-        <button type="button" onClick={() => openForm(false)}>Scan</button>
-        <button type="button" className="secondary" onClick={() => openForm(true)}>No barcode</button>
-      </div>
-      {!staffMode && <button type="button" className="text-button rcv-bundle" onClick={() => setPhase('bundle')}>Bundle items</button>}
+      <button type="button" onClick={() => { setPendingUpc(null); setEntry('identify'); openForm(false); }}>No barcode</button>
+      <ManifestSearchBox client={client} onPick={line => {
+        const code = line.upc_normalized || line.item_number;
+        if (!code) return;
+        setEntry('scan');
+        setPendingUpc(code);
+        openForm(false);
+      }} />
+      {!staffMode && <button type="button" onClick={() => setPhase('bundle')}>Bundle items</button>}
       <ReceiveWorkStatus client={client} accessToken={accessToken} />
 
       <p className="app-section-label">Received today</p>
@@ -146,6 +154,6 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
           </button>
         ))}
       </div>
-    </>
+    </div>
   );
 }

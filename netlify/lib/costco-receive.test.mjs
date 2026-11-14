@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCostcoReceive, candidateTitles, classifyCostcoLine } from "./costco-receive.mjs";
+import { buildCostcoReceive, candidateTitles, classifyCostcoLine, nearestManifestLine } from "./costco-receive.mjs";
 
 const line = {
   tcin: "3858210",
@@ -128,4 +128,23 @@ test("candidate parser keeps each stored title", () => {
     "Alpha toothbrush model one",
     "Beta toothbrush model two",
   ]);
+});
+
+test("an expanded name replaces the truncated manifest stub without overriding the manifest brand", () => {
+  const card = buildCostcoReceive({
+    line,
+    enrich: { expanded_title: "Sharper Image Rolling Massager", expanded_brand: "Sharper Image", ebay_category_id: "20713" },
+  });
+  assert.match(card.merged.title, /Rolling Massager/);
+  assert.equal(card.merged.brand, "Philips Sonicare");
+  assert.equal(card.receive.ebay_category_id, null);
+});
+
+test("a unique barcode within 3 digits suggests that line, and a tie does not", () => {
+  const lines = [
+    { upc_normalized: "079400536761", item_number: "2067097", description: "DEGREE MAX PROTECTION" },
+    { upc_normalized: "079400513656", item_number: "1673482", description: "DOVE ADVANCED CARE" },
+  ];
+  assert.equal(nearestManifestLine("079400536762", lines).line.item_number, "2067097");
+  assert.equal(nearestManifestLine("079400533746", lines), null);
 });

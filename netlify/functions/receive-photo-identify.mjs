@@ -482,12 +482,41 @@ export async function invoke(event) {
   const titleComplete = Boolean(completePhotoTitle(identity, brand, model));
   const identifyMs = Date.now() - t0;
 
+  if (body.action === 'identify_manifest') {
+    const costUsd = tokenCost(identified.input || 0, identified.output || 0, receiveModel());
+    await logUsage(ctx, { ...identity, title, brand, model },
+      { identify_input_tokens: identified.input || 0, identify_output_tokens: identified.output || 0, search_queries: 0 }, costUsd);
+    const { pickManifestItem } = await import("../lib/manifest-pick.mjs");
+    const { costcoReceiveLookup } = await import("../lib/costco-receive.mjs");
+    const { data: manifests } = await ctx.sb.from("store_manifests").select("id").eq("store_id", ctx.storeId);
+    const ids = (manifests || []).map((row) => row.id);
+    const listed = ids.length
+      ? await ctx.sb.from("manifest_lines")
+        .select("item_number,tcin,brand,description,upc_normalized,lot_id")
+        .in("manifest_id", ids)
+        .eq("lot_id", "TRA-7096264")
+        .limit(500)
+      : { data: [] };
+    let item = "";
+    try {
+      item = await pickManifestItem({ brand, title, model, upc, lines: listed.data || [] });
+    } catch (error) {
+      await floorLog({ level: "warn", event: "receive_photo.manifest_pick_failed", message: String(error?.message || error).slice(0, 200), storeId: ctx.storeId });
+    }
+    if (!item) return json(200, { ok: true, card: null, identity: { brand, title, model } });
+    const card = await costcoReceiveLookup(ctx.sb, ctx.storeId, item, { stripMoney: ctx.isAdmin !== true });
+    if (!card?.merged?.title) return json(200, { ok: true, card: null, identity: { brand, title, model } });
+    card.receive = { ...(card.receive || {}), suggested: true, scanned_code: upc || null };
+    await floorLog({ level: "info", event: "receive_photo.manifest_pick", message: item, storeId: ctx.storeId, detail: { upc, title } });
+    return json(200, { ok: true, card });
+  }
+
   if (body.action === 'identify_only') {
     const costUsd = tokenCost(identified.input || 0, identified.output || 0, receiveModel());
     await logUsage(ctx, { ...identity, title, brand, model },
       { identify_input_tokens: identified.input || 0, identify_output_tokens: identified.output || 0,
         search_queries: 0 }, costUsd);
-    if (gtin.ok) await attachPhotoIdentityToMiss(ctx.sb, {
+    if (gtin.ok && body.persist !== false) await attachPhotoIdentityToMiss(ctx.sb, {
       gtin14: gtin.gtin14, identity: { brand, model, title, confidence: identity.confidence, upc },
       missId: body.miss_id || null,
     });
