@@ -4,7 +4,7 @@ import { ReceiveBarcodeScanner } from './ReceiveBarcodeScanner';
 import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
 import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCategoryAspects';
 import { locationMenuLabel, type LocationChoice } from './locationPlace';
-import { receiveStepPlan, type ReceiveStepId } from './receiveSteps';
+import { adjacentReceiveStep, receiveStepPlan, type ReceiveStepId } from './receiveSteps';
 
 const CONDITIONS: [string, string][] = [
   ['New', 'New'],
@@ -98,9 +98,7 @@ export function ReceiveWizard({
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
     if (delta > 0 && step === 'category' && !ebayAspects.categoryId) return;
     if (delta > 0 && step === 'dims' && ![form.length, form.width, form.height, form.weight].every(value => Number(value) > 0)) return;
-    const ids = plan;
-    const index = ids.indexOf(step as ReceiveStepId);
-    const next = ids[index + delta];
+    const next = adjacentReceiveStep(plan, step as ReceiveStepId, delta > 0 ? 1 : -1);
     if (next) setStep(next);
   }
 
@@ -211,6 +209,7 @@ export function ReceiveWizard({
           {retail && <p>Manifest retail {retail}</p>}
           <input inputMode="decimal" value={form.ask} placeholder="0.00" onChange={event => update('ask', event.target.value)} />
           <label>Quantity<input inputMode="numeric" value={form.quantity} onChange={event => update('quantity', event.target.value)} /></label>
+          {stockMatches[0] && <p>You already have {stockMatches[0].quantity} in stock.</p>}
           {!staffMode && <label>Cost, optional<input inputMode="decimal" value={form.cost} onChange={event => update('cost', event.target.value)} /></label>}
           <div className="receive-step-nav">
             <button type="button" onClick={() => go(-1)}>Back</button>

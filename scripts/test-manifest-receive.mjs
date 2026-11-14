@@ -130,8 +130,7 @@ try {
   const repeat = await open({ staff: true, reference: ref, stockMatches: [{ sku: '11500', title: 'Example Portable Radio', quantity: 8, condition: 'New', is_stocked: true, can_convert: false }] });
   await reachPrice(repeat);
   await repeat.locator('input[placeholder="0.00"]').fill('24.99');
-  await repeat.waitForFunction(() => window.__calls.some(call => call.name === 'portal_receive_stock_match'));
-  await repeat.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await repeat.getByText(/already have \d+ in stock/).waitFor();
   await repeat.getByRole('button', { name: 'Next' }).click();
   await repeat.getByLabel('Length').fill('1');
   await repeat.getByLabel('Width').fill('1');

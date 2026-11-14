@@ -1,3 +1,15 @@
+const ORDER: ReceiveStepId[] = ['confirm', 'photo', 'brand', 'title', 'category', 'condition', 'price', 'dims', 'stock', 'location', 'review'];
+
+/** Move one screen. If the current screen dropped out because it just got filled, keep going in the same direction. */
+export function adjacentReceiveStep(plan: ReceiveStepId[], current: ReceiveStepId, delta: 1 | -1): ReceiveStepId | null {
+  const index = plan.indexOf(current);
+  if (index >= 0) return plan[index + delta] || null;
+  const from = ORDER.indexOf(current);
+  if (from < 0) return null;
+  const rest = delta > 0 ? ORDER.slice(from + 1) : ORDER.slice(0, from).reverse();
+  return rest.find(id => plan.includes(id)) || null;
+}
+
 export type ReceiveStepId =
   | 'confirm'
   | 'photo'
