@@ -2144,6 +2144,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         source={result?.receive?.item_number ? `Found by UPC · manifest ${lot || 'TRA-7096264'}` : 'Found by UPC'}
         stockUrl={stockPhotoUrls[0]?.url || ''}
         retailCents={result?.receive?.manifest_retail_cents ?? null}
+        manifestReference={manifestReference}
         form={form}
         update={(key, value) => setForm(prev => ({ ...prev, [key]: value }))}
         doNotList={doNotList} setDoNotList={setDoNotList}

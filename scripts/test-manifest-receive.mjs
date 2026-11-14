@@ -46,7 +46,7 @@ const { outputFiles } = await build({
         ? { store_label: true, true_miss: true, amazon: { found: false }, upcitemdb: { found: false }, merged: { not_found: true } }
         : scenario.miss
         ? { true_miss: true, amazon: { found: false }, upcitemdb: { found: false }, merged: { not_found: true } }
-        : { amazon: { found: true }, merged: { title: 'Catalog Brand Model Lamp', brand: 'Catalog Brand', model: 'Catalog Model', category: 'Home' } }), { status: 200 });
+        : { amazon: { found: true }, merged: { title: 'Catalog Brand Model Lamp', brand: 'Catalog Brand', model: 'Catalog Model', category: 'Home' }, receive: scenario.staff ? { ebay_category_id: '12345' } : undefined }), { status: 200 });
       return new Response(JSON.stringify({ ok: true, price: { count: 0 }, fields: [], aspects: [] }), { status: 200 });
     };
     const initialUpc = Object.prototype.hasOwnProperty.call(scenario, 'initialUpc') ? scenario.initialUpc : '096801681609';
@@ -63,7 +63,8 @@ async function open(scenario) {
   const fixtureReferences = Object.fromEntries(manifestLines.map(line => [line.upc_normalized, fixtureReference(line.upc_normalized)]));
   await page.evaluate(value => { window.__scenario = value; }, { ...scenario, fixtureReferences });
   await page.addScriptTag({ content: outputFiles[0].text });
-  await page.locator(scenario.initialUpc === null ? 'input[placeholder="Scan or type · Enter"]' : 'input[placeholder="0.00"]').waitFor();
+  const marker = scenario.initialUpc === null ? 'input[placeholder="Scan or type · Enter"]' : scenario.staff ? 'text=Is this it?' : 'input[placeholder="0.00"]';
+  await page.locator(marker).waitFor();
   return page;
 }
 async function scan(upc, scenario) {
@@ -71,9 +72,18 @@ async function scan(upc, scenario) {
   const input = page.getByPlaceholder('Scan or type · Enter');
   await input.fill(upc);
   await input.press('Enter');
-  await page.locator('input[placeholder="0.00"]').waitFor();
+  if (scenario.staff) await page.getByText(/Is this it\?|Take picture of item for identification/).waitFor();
+  else await page.locator('input[placeholder="0.00"]').waitFor();
   await page.waitForFunction(code => window.__calls.some(call => call.name === 'portal_manifest_receive_reference' && call.args?.p_upc === code), upc);
   return page;
+}
+async function reachPrice(page) {
+  await page.getByRole('button', { name: "Yes, that's it" }).click();
+  await page.locator('input[type="file"]').first().setInputFiles({ name: 'item.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(4096, 1) });
+  await page.getByRole('button', { name: 'Next' }).click();
+  await page.getByRole('radio', { name: 'New' }).check();
+  await page.getByRole('button', { name: 'Next' }).click();
+  await page.locator('input[placeholder="0.00"]').waitFor();
 }
 async function fields(page) {
   return page.locator('input:not([type="file"]), textarea, select').evaluateAll(elements => elements.map(e => ({ type: e.type, value: e.value, checked: e.checked })));
@@ -111,21 +121,24 @@ try {
   const staff = await open({ staff: true, reference: { ...ref, warnings: [{ manifest_name: ref.manifest_name, total_qty: 14, defective_qty: 2, conditions: ['SALVAGE'] }] } });
   await staff.locator('.manifest-receive-reference').filter({ hasText: 'Manifest retail: $49.99' }).first().waitFor();
   assert.match(await staff.locator('.manifest-receive-reference').first().innerText(), /2 of 14/);
-  assert.equal(await staff.locator('input[placeholder="0.00"]').inputValue(), '');
   assert.equal(await staff.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'clerk cost control stays hidden');
   assert.equal(await staff.evaluate(() => window.__calls.filter(call => call.table === 'store_manifests').length), 0, 'clerk needs only the narrow reference RPC');
-  // Quantity lives in the Price & condition accordion (unmounted when closed).
-  // A second tap closes it, so only open the section when it is shut.
-  const priceSection = staff.getByRole('button', { name: /Price & condition/i });
-  if ((await priceSection.getAttribute('aria-expanded')) !== 'true') await priceSection.click();
-  await staff.getByLabel('Quantity quick select').selectOption('11');
-  assert.equal(await staff.getByLabel('Quantity quick select').inputValue(),'11','clerk can set Qty 11 from the quick select');
-  const repeat=await open({staff:true,reference:ref,stockMatches:[{sku:'11500',title:'Example Portable Radio',quantity:8,condition:'New',is_stocked:true,can_convert:false}]});
+  await reachPrice(staff);
+  assert.equal(await staff.locator('input[placeholder="0.00"]').inputValue(), '');
+  await staff.getByLabel('Quantity').fill('11');
+  assert.equal(await staff.getByLabel('Quantity').inputValue(), '11', 'clerk can set Qty 11 from the price step');
+  const repeat = await open({ staff: true, reference: ref, stockMatches: [{ sku: '11500', title: 'Example Portable Radio', quantity: 8, condition: 'New', is_stocked: true, can_convert: false }] });
+  await reachPrice(repeat);
   await repeat.locator('input[placeholder="0.00"]').fill('24.99');
-  await repeat.getByRole('button',{name:'Add to this SKU'}).waitFor();
-  await repeat.getByRole('button',{name:'Add to this SKU'}).click();
-  await repeat.getByText('SKU 11500 goes to 9 on hand').waitFor();
-  assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(),0,'stock reuse cannot expose clerk cost');
+  await repeat.getByRole('button', { name: 'Next' }).click();
+  await repeat.getByLabel('Length').fill('1');
+  await repeat.getByLabel('Width').fill('1');
+  await repeat.getByLabel('Height').fill('1');
+  await repeat.getByLabel('Weight, lb').fill('1');
+  await repeat.getByRole('button', { name: 'Next' }).click();
+  await repeat.getByRole('button', { name: 'Add to stock' }).click();
+  await repeat.waitForFunction(() => window.__calls.some(call => call.name === 'portal_stock_receive_add' && call.args?.p_sku === '11500' && call.args?.p_quantity === 1));
+  assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'stock reuse cannot expose clerk cost');
   console.log('PASS: manifest retail, no-match, catalog miss → photo prompt, all fields isolated, SALVAGE/mixed warnings, manual price, slow/failing sidecar.');
   for (const isStaff of [false, true]) {
     for (const testCase of [
@@ -137,7 +150,8 @@ try {
       const page = await scan(testCase.upc, { staff: isStaff, useFixtureReference: true, storeLabel: testCase.storeLabel });
       await page.locator('.manifest-receive-reference').filter({ hasText: `Manifest retail: ${testCase.price}` }).first().waitFor();
       if (testCase.storeLabel) await page.getByRole('dialog').waitFor();
-      assert.equal(await page.locator('input[placeholder="0.00"]').inputValue(), '', `${testCase.upc} does not set the selling price`);
+      if (isStaff) assert.equal(await page.locator('input[placeholder="0.00"]').count(), 0, `${testCase.upc} does not set the selling price`);
+      else assert.equal(await page.locator('input[placeholder="0.00"]').inputValue(), '', `${testCase.upc} does not set the selling price`);
       if (testCase.warning) assert.match(await page.locator('.manifest-receive-reference').first().innerText(), new RegExp(testCase.warning));
       if (isStaff) assert.equal(await page.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'clerk cost control stays hidden');
       await page.close();

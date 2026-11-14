@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { scannerLifecycle } from './scannerLifecycle';
 import { normalizeUpc } from './upcValidate';
@@ -37,11 +37,12 @@ function beep() {
   navigator.vibrate?.(60);
 }
 
-export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onPhoto }: {
+export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onPhoto, banner }: {
   onDetect: (code: string) => void;
   onClose: () => void;
   mode?: 'barcode' | 'photo';
   onPhoto?: (file: File) => void;
+  banner?: ReactNode;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const detect = useRef(onDetect);
@@ -168,6 +169,7 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
         {torchOk && <button type="button" onClick={() => void toggleTorch()}>{torchOn ? 'Light off' : 'Light'}</button>}
         {mode === 'photo' && <button type="button" onClick={takePhoto}>OK</button>}
       </div>
+      {banner}
       {err && <p className="receive-scanner-error" role="alert">{err}</p>}
       {mode === 'barcode' && <form className="receive-scanner-type" onSubmit={event => { event.preventDefault(); submitTyped(); }}>
         <label>Type UPC<input inputMode="numeric" autoComplete="off" value={typed} onChange={event => setTyped(event.target.value)} /></label>

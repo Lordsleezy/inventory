@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceiveBarcodeScanner } from './ReceiveBarcodeScanner';
+import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
 import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCategoryAspects';
 import { locationMenuLabel, type LocationChoice } from './locationPlace';
 import { receiveStepPlan, type ReceiveStepId } from './receiveSteps';
@@ -21,7 +22,7 @@ type Stock = { sku: string; title: string; quantity: number; condition: string |
 
 export function ReceiveWizard({
   client, storeId, accessToken, staffMode,
-  lookupId, lookupStatus, miss, title, brand, details, source, stockUrl, retailCents,
+  lookupId, lookupStatus, miss, title, brand, details, source, stockUrl, retailCents, manifestReference,
   form, update, doNotList, setDoNotList,
   hasPhoto, onPhoto, onIdentify,
   locations, location, setLocation,
@@ -42,6 +43,7 @@ export function ReceiveWizard({
   source: string;
   stockUrl: string;
   retailCents: number | null;
+  manifestReference: ReturnType<typeof useManifestReceiveReference>;
   form: FormSlice;
   update: (key: 'brand' | 'title' | 'ask' | 'cost' | 'quantity' | 'length' | 'width' | 'height' | 'weight' | 'condition', value: string) => void;
   doNotList: boolean;
@@ -114,9 +116,10 @@ export function ReceiveWizard({
     </div>
   );
 
+  const reference = <ManifestReceiveReference result={manifestReference} />;
   if (step === 'scan') return <ReceiveBarcodeScanner onClose={onCancel} onDetect={onScan} />;
   if (step === 'identify') {
-    return <ReceiveBarcodeScanner mode="photo" onClose={onClear} onDetect={() => undefined} onPhoto={file => { void Promise.resolve(onIdentify(file)).then(() => setStep('confirm')); }} />;
+    return <ReceiveBarcodeScanner mode="photo" banner={reference} onClose={onClear} onDetect={() => undefined} onPhoto={file => { void Promise.resolve(onIdentify(file)).then(() => setStep('confirm')); }} />;
   }
 
   return (
@@ -131,6 +134,7 @@ export function ReceiveWizard({
       {step === 'confirm' && (
         <div className="receive-step">
           {stockUrl ? <img src={stockUrl} alt="" /> : <p>No stock photo</p>}
+          {reference}
           <h2>{title || 'Unknown item'}</h2>
           <p>{[brand, details].filter(Boolean).join(' · ')}</p>
           <p>{source}</p>
