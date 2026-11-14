@@ -617,6 +617,23 @@ html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 .receive-scanner-shade{position:absolute;inset:0;background:linear-gradient(#000,transparent 18%,transparent 62%,#000)}
 .receive-scanner-frame{position:absolute;left:50%;top:42%;width:min(78vw,420px);height:150px;transform:translate(-50%,-50%);border:2px solid #fff;overflow:hidden}
 .receive-scanner-line{position:absolute;left:0;right:0;height:2px;background:#e10600;animation:receive-scan 1.4s ease-in-out infinite}
+.receive-scanner-caption{position:absolute;left:8px;right:8px;bottom:8px;color:#fff;font-size:13px;text-align:center}
+.receive-scanner .manifest-receive-reference{position:absolute;left:16px;right:16px;top:64px;z-index:2;background:#000}
+.receive-steps{min-height:100%;background:#000;color:#fff;display:flex;flex-direction:column;gap:16px;padding:12px 16px 24px}
+.receive-step-top{display:flex;justify-content:space-between;align-items:center}
+.receive-step-top button,.receive-steps button,.receive-steps input{background:#000;color:#fff;border:1px solid #fff;border-radius:0;padding:10px 12px;font:inherit}
+.receive-steps button:disabled{color:#9a9a9a;border-color:#4a4a4a}
+.receive-steps button.is-on,.receive-step-picks button.is-on{background:#fff;color:#000}
+.receive-step h2{font-size:22px;margin:8px 0}
+.receive-step-req{color:#e10600}
+.receive-step-error{color:#e10600;font-weight:700}
+.receive-step-nav,.receive-step-picks{display:flex;flex-wrap:wrap;gap:8px}
+.receive-step-choice{display:flex;gap:10px;align-items:center;padding:8px 0}
+.receive-step-file{position:relative;display:inline-block}
+.receive-step-file input{position:absolute;inset:0;opacity:0}
+.receive-step img{max-width:160px;max-height:160px;object-fit:contain;background:#000}
+html.app-mode .receive-chip{border-radius:0!important;background:#000!important;color:#fff!important;border:1px solid #fff!important}
+html.app-mode .receive-chip.on{background:#fff!important;color:#000!important}
 @keyframes receive-scan{0%{top:8px}100%{top:140px}}
 .receive-scanner-bar,.receive-scanner-type{position:absolute;left:0;right:0;display:flex;gap:12px;align-items:center;padding:16px;background:#000}
 .receive-scanner-bar{top:0}.receive-scanner-type{bottom:0}
