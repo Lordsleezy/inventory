@@ -167,13 +167,25 @@ function numberOrNull(value) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function measurementSource(product, key) {
+  const sources = product?.dim_sources && typeof product.dim_sources === "object" ? product.dim_sources : {};
+  return String(sources[key] || sources[`package_${key}`] || "");
+}
+
+/** A box saved on this barcode. Estimates and guesses are not measurements. */
+function storedBoxMeasure(product, column) {
+  const key = column.replace(/^package_/, "");
+  if (/estimat|\bai\b|gemini/i.test(measurementSource(product, key))) return null;
+  return numberOrNull(product?.[column]);
+}
+
 function packageFrom(product, amazon, pinned) {
   const box = pinned?.package || {};
   return {
-    length_in: numberOrNull(product?.package_length_in) || numberOrNull(amazon?.package?.length_in) || numberOrNull(box.length_in),
-    width_in: numberOrNull(product?.package_width_in) || numberOrNull(amazon?.package?.width_in) || numberOrNull(box.width_in),
-    height_in: numberOrNull(product?.package_height_in) || numberOrNull(amazon?.package?.height_in) || numberOrNull(box.height_in),
-    weight_lb: numberOrNull(product?.package_weight_lb) || numberOrNull(amazon?.package?.weight_lb) || numberOrNull(box.weight_lb) || numberOrNull(product?.aspects?.published_weight?.weight_lb || product?.aspects?.published_weight),
+    length_in: storedBoxMeasure(product, "package_length_in") || numberOrNull(amazon?.package?.length_in) || numberOrNull(box.length_in),
+    width_in: storedBoxMeasure(product, "package_width_in") || numberOrNull(amazon?.package?.width_in) || numberOrNull(box.width_in),
+    height_in: storedBoxMeasure(product, "package_height_in") || numberOrNull(amazon?.package?.height_in) || numberOrNull(box.height_in),
+    weight_lb: storedBoxMeasure(product, "package_weight_lb") || numberOrNull(amazon?.package?.weight_lb) || numberOrNull(box.weight_lb) || numberOrNull(product?.aspects?.published_weight?.weight_lb || product?.aspects?.published_weight),
   };
 }
 
@@ -207,11 +219,15 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
     product, amazon, expandedTitle, trusted: useCatalog,
   });
   const expandedPkg = enrich?.package && typeof enrich.package === "object" ? enrich.package : {};
-  const pkg = useCatalog ? packageFrom(product, amazon, pinned) : {
-    length_in: numberOrNull(expandedPkg.length_in),
-    width_in: numberOrNull(expandedPkg.width_in),
-    height_in: numberOrNull(expandedPkg.height_in),
-    weight_lb: numberOrNull(expandedPkg.weight_lb),
+  // The title can stay untrusted without throwing away the box saved for this barcode.
+  // A different product's Amazon package is not used unless that catalog match itself is trusted.
+  const savedBox = packageFrom(product, null, null);
+  const catalogBox = useCatalog ? packageFrom(product, amazon, pinned) : savedBox;
+  const pkg = {
+    length_in: catalogBox.length_in || numberOrNull(expandedPkg.length_in),
+    width_in: catalogBox.width_in || numberOrNull(expandedPkg.width_in),
+    height_in: catalogBox.height_in || numberOrNull(expandedPkg.height_in),
+    weight_lb: catalogBox.weight_lb || numberOrNull(expandedPkg.weight_lb),
   };
   const aspects = useCatalog ? itemAspects(product, amazon, pinned) : specificsFrom(enrich?.specifics);
   const pack = packCountOf(line?.description, enrich?.variant_note, product?.aspects);
