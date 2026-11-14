@@ -140,6 +140,35 @@ test("an expanded name replaces the truncated manifest stub without overriding t
   assert.equal(card.receive.ebay_category_id, null);
 });
 
+test("a box saved for this barcode fills even when the catalog title is not trusted", () => {
+  const card = buildCostcoReceive({
+    line: { ...line, description: "INFINITY X1 UNDER CABINET LIGHT" },
+    enrich: { status: "partial", why: "Several Amazon results match: Infinity light one | Infinity light two" },
+    product: {
+      title: "Some other light",
+      package_length_in: 10.47,
+      package_width_in: 10.12,
+      package_height_in: 2.91,
+      package_weight_lb: 2.27,
+      dim_sources: { length_in: "published", width_in: "published", height_in: "published", weight_lb: "published" },
+    },
+    amazon: { found: true, identifier_match: false, title: "Some other light", package: { length_in: 99, width_in: 99, height_in: 99, weight_lb: 99 } },
+  });
+  assert.match(card.merged.title, /INFINITY X1/);
+  assert.equal(card.merged.title.includes("other light"), false);
+  assert.deepEqual(card.merged.package, { length_in: 10.47, width_in: 10.12, height_in: 2.91, weight_lb: 2.27 });
+});
+
+test("an estimated box is not treated as a measurement", () => {
+  const card = buildCostcoReceive({
+    line,
+    product: { package_length_in: 9, package_weight_lb: 4, dim_sources: { length_in: "estimated", weight_lb: "gemini" } },
+    amazon: { found: false },
+  });
+  assert.equal(card.merged.package.length_in, null);
+  assert.equal(card.merged.package.weight_lb, null);
+});
+
 test("a catalog title that only borrows the manifest words is not a stock photo", () => {
   const images = stockImagesForLine({
     line: { description: "DISNEY HALLOWEEN VILLAGE", brand: "" },
