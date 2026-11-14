@@ -1039,7 +1039,7 @@ html.app-mode .app-receive-title {
   gap: 12px;
 }
 html.app-mode .app-scanner-status {
-  display: inline-flex;
+  display: none !important;
   align-items: center;
   gap: 6px;
   font-size: 13px;
@@ -1059,6 +1059,7 @@ html.app-mode .app-scanner-status.ok i { background: #fff; }
 html.app-mode .app-scanner-status.warn { color: #FF453A; }
 html.app-mode .app-scanner-status.warn i { background: #FF453A; }
 html.app-mode .app-item-scanner-status {
+  display: none !important;
   flex: 0 0 auto;
   max-width: 92px;
   padding: 5px 7px;
