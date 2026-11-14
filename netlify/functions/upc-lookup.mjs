@@ -9,7 +9,7 @@ import { receiveAccessFromEvent } from "../lib/receive-auth.mjs";
 import { netlifyHandler, floorLog } from "../lib/floor-log.mjs";
 import { lookupUpc } from "../lib/upc-lookup.mjs";
 import { normalizeGtin } from "../lib/gtin-normalize.mjs";
-import { costcoReceiveLookup, pinCostcoVariant, saveCostcoCorrection } from "../lib/costco-receive.mjs";
+import { acceptManifestIdentity, costcoReceiveLookup, pinCostcoVariant, saveCostcoCorrection } from "../lib/costco-receive.mjs";
 
 const BATCH_MAX = 100;
 
@@ -51,6 +51,15 @@ async function actions(event, ctx) {
       return json(200, card);
     } catch (err) {
       return json(err.status || 500, { ok: false, error: err.message || "pin_failed" });
+    }
+  }
+
+  if (action === "accept_manifest") {
+    try {
+      const card = await acceptManifestIdentity(ctx.sb, ctx.storeId, body.upc || body.item_number);
+      return json(200, card);
+    } catch (err) {
+      return json(err.status || 500, { ok: false, error: err.message || "accept_failed" });
     }
   }
 

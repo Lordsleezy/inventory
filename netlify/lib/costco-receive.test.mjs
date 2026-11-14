@@ -20,14 +20,13 @@ test("variant titles come from the stored tie, not a stale catalog title", () =>
     product: { title: "Philips Sonicare Professional Clean Plus Electric Toothbrush Set White/Blue", brand: "Philips Sonicare", images: [] },
     amazon: { found: false },
   });
-  assert.equal(card.receive.bucket, "picker");
+  assert.equal(card.receive.bucket, "ready");
   assert.equal(card.receive.photo, false);
-  assert.equal(card.receive.candidates.length, 3);
-  assert.equal(card.receive.candidates[1].color, "white");
+  assert.equal(card.receive.candidates.length, 0);
   assert.equal(card.merged.title.includes("Professional Clean Plus"), false);
   assert.match(card.merged.title, /ADVANCED CLEAN/i);
   assert.equal(card.amazon.skipped, "prewarmed");
-  assert.equal(card.receive.condition_hint, "Used - Good");
+  assert.equal(card.receive.condition_hint, "");
   assert.equal(card.receive.manifest_retail_cents, 8999);
 });
 
@@ -64,8 +63,8 @@ test("no Amazon match keeps the manifest identity and opens the photo step", () 
     product: { title: "Mesa 2 tier black organizer — New", brand: "Mesa", images: [] },
     amazon: { found: false },
   });
-  assert.equal(card.receive.bucket, "manifest");
-  assert.equal(card.receive.photo, true);
+  assert.equal(card.receive.bucket, "ready");
+  assert.equal(card.receive.photo, false);
   assert.match(card.merged.title, /MESA 2 TIER ORGANIZER/);
   assert.equal(card.merged.images.length, 0);
 });
@@ -85,9 +84,9 @@ test("a 4999 sticker is never a GTIN", () => {
   });
   assert.equal(card.gtin, null);
   assert.equal(card.receive.internal, true);
-  assert.equal(card.receive.bucket, "picker");
-  assert.equal(card.receive.candidates[0].color, "black");
-  assert.equal(card.receive.candidates[1].color, "green");
+  assert.equal(card.receive.bucket, "ready");
+  assert.equal(card.receive.candidates.length, 0);
+  assert.match(card.merged.title, /PUMA UNLIMITED BACKPACK/);
 });
 
 test("open conflicts stay on the card and a saved answer is returned", () => {

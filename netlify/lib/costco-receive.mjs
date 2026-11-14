@@ -3,18 +3,10 @@
  * Reads floor_products, the lookup cache, and the manifest. No catalog calls.
  */
 import { isCostcoInternalCode } from "./gtin.mjs";
-import { normalizeGtin } from "./gtin-normalize.mjs";
+import { barcodeLookupKeys, normalizeGtin } from "./gtin-normalize.mjs";
 
 const LOT_KEY = "manifest_line_enrichment_TRA-7096264";
 const COLORS = ["brushed nickel", "polished gold", "obsidian", "stainless", "black", "white", "silver", "gold", "blue", "green", "red", "navy", "gray", "grey", "pink", "brown"];
-const CONDITIONS = {
-  NEW: "New",
-  USED_GOOD: "Used - Good",
-  USED_FAIR: "Used - Fair",
-  OPEN_BOX: "Open box",
-  OPEN: "Open box",
-};
-
 function digits(value) {
   return String(value ?? "").replace(/\D/g, "");
 }
@@ -83,30 +75,36 @@ export function conflictFor(itemNumber, enrich) {
 }
 
 /**
+ * A catalog row is usable only when the source matched this GTIN.
+ * A title search is not a match, and it never becomes a picker.
+ */
+export function catalogTrusted({ amazon = null, enrich = {} } = {}) {
+  if (amazon?.identifier_match === true && (amazon?.found || clean(amazon?.title))) return true;
+  return enrich?.via === "gtin" && Boolean(clean(enrich?.title));
+}
+
+/**
  * Decide what Receive should show. Pure: no I/O.
- * bucket ready = fill the form. picker = choose a variant. manifest = identity plus the photo step.
+ * A manifest line is always found. Catalog details are added only for a GTIN match.
  */
 export function classifyCostcoLine({ line, enrich = {}, product = null, amazon = null }) {
   const item = String(line?.tcin || line?.item_number || "");
   const internal = isCostcoInternalCode(line?.upc_raw) || isCostcoInternalCode(line?.upc_normalized);
   const pinnedTitle = clean(product?.aspects?.pinned_title || enrich?.pinned?.title || enrich?.pinned_title);
-  const candidates = pinnedTitle ? [] : candidateTitles(enrich?.why);
-  const why = clean(enrich?.why);
-  const wrong = /does not match/i.test(why);
-  const missing = enrich?.status === "missing" || /no matching product|not in the amazon catalog/i.test(why);
-  const singleCatalog = Boolean(amazon?.found && amazon?.title) && !wrong && !missing;
-  const confirmed = enrich?.status === "confirmed" || Boolean(pinnedTitle) || singleCatalog;
-  let bucket = "manifest";
-  if (candidates.length > 1) bucket = "picker";
-  else if (confirmed && (pinnedTitle || product?.title || amazon?.title || enrich?.title)) bucket = "ready";
-  else if (!missing && !wrong && (product?.title || enrich?.title) && enrich?.status === "confirmed") bucket = "ready";
-  const photo = bucket === "manifest";
-  return { item, internal, bucket, photo, candidates, pinnedTitle, conflict: conflictFor(item, { ...enrich, resolved: { ...(enrich?.resolved || {}), ...(product?.aspects?.resolved || {}) } }) };
-}
-
-function conditionHint(condition) {
-  const key = String(condition || "").trim().toUpperCase().replace(/[\s-]+/g, "_");
-  return CONDITIONS[key] || "";
+  const trusted = catalogTrusted({ amazon, enrich });
+  const fuzzy = candidateTitles(enrich?.why);
+  const review = !enrich?.identity_accepted && !trusted && (fuzzy.length > 0 || Boolean(clean(product?.title) && !pinnedTitle));
+  return {
+    item,
+    internal,
+    bucket: "ready",
+    photo: false,
+    candidates: [],
+    pinnedTitle: trusted ? pinnedTitle : "",
+    review,
+    trusted,
+    conflict: conflictFor(item, { ...enrich, resolved: { ...(enrich?.resolved || {}), ...(product?.aspects?.resolved || {}) } }),
+  };
 }
 
 function numberOrNull(value) {
@@ -139,7 +137,7 @@ function itemAspects(product, amazon, pinned) {
 export function buildCostcoReceive({ line, enrich = {}, product = null, amazon = null, costco = null, stripMoney = false }) {
   const decision = classifyCostcoLine({ line, enrich, product, amazon });
   const pinned = enrich?.pinned && typeof enrich.pinned === "object" ? enrich.pinned : null;
-  const useCatalog = decision.bucket === "ready";
+  const useCatalog = decision.trusted;
   const brand = clean(useCatalog ? (product?.brand || pinned?.brand || amazon?.brand || enrich?.brand || line?.brand) : (line?.brand || enrich?.brand));
   const title = clean(useCatalog
     ? (decision.pinnedTitle || product?.title || pinned?.title || amazon?.title || enrich?.title || line?.description)
@@ -170,7 +168,7 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
       model: model || null,
       description: [description, features.length ? features.map((row) => `• ${row}`).join("\n") : ""].filter(Boolean).join("\n\n") || null,
       features,
-      category: clean(product?.category || costco?.category) || null,
+      category: clean(useCatalog ? (product?.category || costco?.category || line?.seller_category || line?.category) : (line?.seller_category || line?.category)) || null,
       aspects,
       images,
       package: pkg,
@@ -182,7 +180,8 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
       bucket: decision.bucket,
       item_number: decision.item,
       pack_count: pack,
-      condition_hint: conditionHint(line?.condition),
+      condition_hint: "",
+      review: decision.review,
       manifest_retail_cents: retail,
       conflict: decision.conflict,
       candidates,
@@ -199,10 +198,12 @@ async function manifestIds(sb, storeId) {
   return (data || []).map((row) => row.id);
 }
 
+const LINE_COLS = "line_number,upc_raw,upc_normalized,tcin,item_number,description,brand,category,seller_category,qty,unit_retail_cents,condition,lot_id,manifest_id";
+
 async function lineBy(sb, ids, column, value) {
   if (!ids.length || !value) return null;
   const { data, error } = await sb.from("manifest_lines")
-    .select("line_number,upc_raw,upc_normalized,tcin,description,brand,qty,unit_retail_cents,condition,lot_id,manifest_id")
+    .select(LINE_COLS)
     .in("manifest_id", ids)
     .eq(column, value)
     .limit(1);
@@ -210,29 +211,49 @@ async function lineBy(sb, ids, column, value) {
   return data?.[0] || null;
 }
 
+function preferLine(rows, keys) {
+  const want = new Set(keys);
+  return (rows || []).find((row) => want.has(row.upc_normalized) || want.has(row.upc_raw) || (row.alternate_upcs || []).some((code) => want.has(String(code))))
+    || (rows || []).find((row) => want.has(row.tcin) || want.has(row.item_number))
+    || null;
+}
+
+async function lineByStoredAlternate(sb, storeId, ids, keys) {
+  const { data, error } = await sb.from("store_settings").select("value").eq("store_id", storeId).like("key", "manifest_line_enrichment_%");
+  if (error || !data?.length) return null;
+  const want = new Set(keys);
+  for (const row of data) {
+    const book = row.value && typeof row.value === "object" ? row.value : {};
+    for (const [tcin, entry] of Object.entries(book)) {
+      const alts = Array.isArray(entry?.alternate_upcs) ? entry.alternate_upcs : [];
+      if (!alts.some((code) => want.has(String(code).replace(/\D/g, "")))) continue;
+      const line = await lineBy(sb, ids, "tcin", tcin) || await lineBy(sb, ids, "item_number", tcin);
+      if (line) return line;
+    }
+  }
+  return null;
+}
+
 export async function findManifestLine(sb, storeId, raw) {
   const ids = await manifestIds(sb, storeId);
   const text = clean(raw);
-  const code = digits(text);
+  const keys = barcodeLookupKeys(text);
   if (!ids.length || !text) return { ids, line: null, many: [] };
-  if (isCostcoInternalCode(code)) {
-    return { ids, line: await lineBy(sb, ids, "upc_normalized", code) || await lineBy(sb, ids, "upc_raw", code), many: [] };
-  }
-  if (/^\d{4,10}$/.test(code) && code.length < 12) {
-    const line = await lineBy(sb, ids, "tcin", code);
-    return { ids, line, many: [] };
-  }
-  const gtin = normalizeGtin(code);
-  if (gtin.ok) {
-    const line = await lineBy(sb, ids, "upc_normalized", gtin.upcA)
-      || await lineBy(sb, ids, "upc_normalized", gtin.ean13)
-      || await lineBy(sb, ids, "upc_raw", gtin.upcA);
-    return { ids, line, many: [] };
+  if (keys.length) {
+    const filter = keys.map((key) => `upc_normalized.eq.${key},upc_raw.eq.${key},tcin.eq.${key},item_number.eq.${key}`).join(",");
+    const { data, error } = await sb.from("manifest_lines").select(LINE_COLS).in("manifest_id", ids).or(filter).limit(8);
+    if (error) throw new Error(error.message);
+    const line = preferLine(data, keys);
+    if (line) return { ids, line, many: [] };
+    const alt = await sb.from("manifest_lines").select(LINE_COLS).in("manifest_id", ids).overlaps("alternate_upcs", keys).limit(1);
+    if (!alt.error && alt.data?.[0]) return { ids, line: alt.data[0], many: [] };
+    const stored = await lineByStoredAlternate(sb, storeId, ids, keys);
+    if (stored) return { ids, line: stored, many: [] };
   }
   if (text.length >= 3 && /[a-z]/i.test(text)) {
     const safe = text.replace(/[%_\\]/g, " ").slice(0, 60);
     const { data, error } = await sb.from("manifest_lines")
-      .select("line_number,upc_raw,upc_normalized,tcin,description,brand,qty,unit_retail_cents,condition,lot_id,manifest_id")
+      .select(LINE_COLS)
       .in("manifest_id", ids)
       .ilike("description", `%${safe}%`)
       .limit(8);
@@ -417,4 +438,25 @@ export async function saveCostcoCorrection(sb, storeId, { code, itemNumber, fiel
   }
   await remember(sb, storeId, ctx.key, ctx.book, String(found.line.tcin || ""), { resolved });
   return { ok: true, field: name, value: entered };
+}
+
+/** Clerk keeps the manifest name and drops a fuzzy catalog guess from the review list. */
+export async function acceptManifestIdentity(sb, storeId, raw) {
+  const found = await findManifestLine(sb, storeId, raw);
+  if (!found.line) throw Object.assign(new Error("That barcode is not on a manifest"), { status: 404 });
+  const ctx = await loadContext(sb, storeId, found.line);
+  const title = clean(found.line.description);
+  await remember(sb, storeId, ctx.key, ctx.book, String(found.line.tcin || ""), {
+    identity_accepted: true,
+    pinned_title: title,
+    status: "confirmed",
+    via: "manifest",
+  });
+  return buildCostcoReceive({
+    line: found.line,
+    enrich: { ...ctx.enrich, identity_accepted: true, pinned_title: title, via: "manifest" },
+    product: null,
+    amazon: null,
+    stripMoney: false,
+  });
 }
