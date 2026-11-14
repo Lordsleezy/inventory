@@ -16,6 +16,28 @@ export function categoryFits(name, categoryName) {
     .some((word) => hay.includes(word) || hay.includes(word.replace(/s$/, "")) || hay.includes(word.replace(/es$/, "")));
 }
 
+export function imageUrlOk(url) {
+  const text = String(url || "");
+  return /^https:\/\//i.test(text)
+    && !/\/1x1[./]|pixel|placeholder|spacer|blank\./i.test(text)
+    && (/\.(jpe?g|png|webp|avif|gif)(\?|$)/i.test(text) || /ebayimg|media-amazon|images-amazon|ssl-images-amazon|costco|scene7|upcitemdb|walmartimages|goepson|ulta\.com|\/image\/|rendition|adobe\/assets|fmt=auto/i.test(text));
+}
+
+/** First image whose listing title belongs to this manifest line. A trusted barcode match skips the title check. */
+export function chooseStockPhoto(lineText, candidates) {
+  for (const row of candidates || []) {
+    if (!imageUrlOk(row?.url)) continue;
+    if (row.trusted || sharesPhotoTitle(row.title || "", lineText)) return row.url;
+  }
+  return "";
+}
+
+function sharesPhotoTitle(left, right) {
+  if (sharesToken(left, right)) return true;
+  const known = [...words(right)];
+  return [...words(left)].some((word) => known.some((other) => word.length >= 4 && other.length >= 4 && (word.startsWith(other) || other.startsWith(word))));
+}
+
 export function sharesToken(left, right) {
   const known = words(right);
   return [...words(left)].some((word) => known.has(word));

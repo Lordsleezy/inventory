@@ -4,6 +4,7 @@ import { ReceiveBarcodeScanner } from './ReceiveBarcodeScanner';
 import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
 import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCategoryAspects';
 import { locationMenuLabel, type LocationChoice } from './locationPlace';
+import { manifestDefectWarnings } from './manifestReference';
 import { adjacentReceiveStep, receiveStepPlan, type ReceiveStepId } from './receiveSteps';
 
 const CONDITIONS: [string, string][] = [
@@ -24,7 +25,7 @@ export function ReceiveWizard({
   client, storeId, accessToken, staffMode,
   lookupId, lookupStatus, miss, title, brand, details, source, stockUrl, retailCents, manifestReference,
   form, update, doNotList, setDoNotList,
-  hasPhoto, onPhoto, onIdentify,
+  hasPhoto, photoPreviews = [], onPhoto, onIdentify,
   locations, location, setLocation,
   stockMatches, onAddToStock, addingToStock,
   ebayAspects, setEbayAspects, needsSpecifics,
@@ -50,6 +51,7 @@ export function ReceiveWizard({
   doNotList: boolean;
   setDoNotList: (on: boolean) => void;
   hasPhoto: boolean;
+  photoPreviews?: string[];
   onPhoto: (file: File) => void;
   onIdentify: (file: File) => void;
   locations: LocationChoice[];
@@ -143,28 +145,36 @@ export function ReceiveWizard({
       {step === 'lookup' && <p>Looking up the barcode…</p>}
       {step === 'confirm' && (
         <div className="receive-step">
-          {stockUrl ? <img src={stockUrl} alt="" /> : <p>No stock photo</p>}
-          {reference}
-          <h2>{title || 'Unknown item'}</h2>
-          <p>{[brand, details].filter(Boolean).join(' · ')}</p>
-          <p>{source}</p>
-          {retail && <p>Manifest retail {retail}</p>}
-          <p className="receive-step-q"><strong>Is this it?</strong></p>
-          <button type="button" onClick={() => { void Promise.resolve(onAccept()).then(() => setStep('photo')); }}>Yes, that's it</button>
-          <button type="button" onClick={() => { onReject(); seen.current = lookupId; setStep('identify'); }}>No</button>
+          <div className="receive-step-main">
+            {stockUrl ? <img className="receive-stock" src={stockUrl} alt="Stock photo" /> : <p>No stock photo</p>}
+            <h2>{title || 'Unknown item'}</h2>
+            <p>{[brand, details].filter(Boolean).join(' · ')}</p>
+            <p className={manifestReference?.reference ? 'manifest-receive-reference' : undefined}>
+              {[source, manifestReference?.reference?.retail_cents != null && `Manifest retail: ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(manifestReference.reference.retail_cents / 100)}`].filter(Boolean).join(' · ')}
+              {(manifestReference?.reference ? manifestDefectWarnings(manifestReference.reference) : []).map(warning => <span key={warning} role="alert">{warning}</span>)}
+            </p>
+            <p className="receive-step-q"><strong>Is this it?</strong></p>
+          </div>
+          <div className="receive-step-nav">
+            <button type="button" onClick={() => { void Promise.resolve(onAccept()).then(() => setStep('photo')); }}>Yes, that's it</button>
+            <button type="button" onClick={() => { onReject(); seen.current = lookupId; setStep('identify'); }}>No</button>
+          </div>
         </div>
       )}
       {step === 'photo' && (
         <div className="receive-step">
-          <h2>Take a real photo <span className="receive-step-req">*</span></h2>
-          {stockUrl && <p>Stock photo saved with the item. You still need your own photo.</p>}
-          <label className="receive-step-file">Take photo
-            <input type="file" accept="image/*" capture="environment" onChange={event => { const file = event.target.files?.[0]; if (file) onPhoto(file); }} />
-          </label>
-          <label className="receive-step-file">Choose from library
-            <input type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; if (file) onPhoto(file); }} />
-          </label>
-          {hasPhoto && <p><strong>Photo ready.</strong></p>}
+          <div className="receive-step-main">
+            <h2>Take a real photo <span className="receive-step-req">*</span></h2>
+            {stockUrl && <img className="receive-stock" src={stockUrl} alt="Stock photo" />}
+            {stockUrl && <p>Stock photo saved. You still need your own photo.</p>}
+            {photoPreviews.map(url => <img key={url} className="receive-stock" src={url} alt="Your photo" />)}
+            <label className="receive-photo-take">{hasPhoto ? 'Take another' : 'Take photo'}
+              <input type="file" accept="image/*" capture="environment" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onPhoto(file); }} />
+            </label>
+            <label className="receive-photo-library">Choose from library
+              <input type="file" accept="image/*" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onPhoto(file); }} />
+            </label>
+          </div>
           <div className="receive-step-nav">
             <button type="button" onClick={() => setStep('confirm')}>Back</button>
             <button type="button" disabled={!hasPhoto} onClick={() => go(1)}>Next</button>
@@ -244,8 +254,10 @@ export function ReceiveWizard({
           <h2>You already have {stockMatches[0]?.quantity || 0} of these</h2>
           <p>{stockMatches[0]?.title} · SKU {stockMatches[0]?.sku}</p>
           <label>Add how many?<input inputMode="numeric" value={form.quantity} onChange={event => update('quantity', event.target.value)} /></label>
-          <button type="button" disabled={busy || addingToStock || !stockMatches[0]} onClick={() => stockMatches[0] && onAddToStock(stockMatches[0].sku)}>{addingToStock ? 'Adding…' : 'Add to stock'}</button>
-          <button type="button" onClick={() => go(1)}>Receive as a separate item</button>
+          <div className="receive-step-nav is-stack">
+            <button type="button" disabled={busy || addingToStock || !stockMatches[0]} onClick={() => stockMatches[0] && onAddToStock(stockMatches[0].sku)}>{addingToStock ? 'Adding…' : 'Add to stock'}</button>
+            <button type="button" onClick={() => go(1)}>Receive as a separate item</button>
+          </div>
         </div>
       )}
       {step === 'location' && (
@@ -281,8 +293,10 @@ export function ReceiveWizard({
           <p>{[form.length, form.width, form.height].filter(Boolean).join(' × ')} in · {form.weight} lb</p>
           <p>{locationMenuLabel(locations.find(item => item.code === location) || { code: location })}</p>
           <p>{hasPhoto ? '1 photo' : 'No photo yet'}</p>
-          <button type="button" disabled={busy || !hasPhoto || !location || (!doNotList && !form.ask.trim())} onClick={onSave}>{busy ? 'Saving…' : 'Save & scan next'}</button>
-          <button type="button" onClick={() => setStep('location')}>Back</button>
+          <div className="receive-step-nav">
+            <button type="button" onClick={() => setStep('location')}>Back</button>
+            <button type="button" disabled={busy || !hasPhoto || !location || (!doNotList && !form.ask.trim())} onClick={onSave}>{busy ? 'Saving…' : 'Save & scan next'}</button>
+          </div>
         </div>
       )}
     </div>
