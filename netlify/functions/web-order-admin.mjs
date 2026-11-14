@@ -21,6 +21,7 @@ import {
   retryLabelExtract,
   setOrderTrackingNumber,
 } from "../lib/order-label.mjs";
+import { syncVerifiedWeightToEbay } from "../lib/ebay-order-weight-sync.mjs";
 
 const STAFF_LABEL_ACTIONS = new Set([
   "attach_label",
@@ -28,6 +29,7 @@ const STAFF_LABEL_ACTIONS = new Set([
   "accept_marketplace_tracking",
   "accept_label_tracking",
   "retry_label_extract",
+  "sync_ebay_weight",
 ]);
 
 async function handle(event) {
@@ -108,6 +110,21 @@ async function handle(event) {
     if (!order) return json(404, { error: "Order not found." });
     const r = await retryLabelExtract(sb, storeId, order);
     return json(r.status, r);
+  }
+  if (body.action === "sync_ebay_weight") {
+    const { data: order, error: loadError } = await sb.from("web_orders").select("*").eq("id", id).eq("store_id", storeId).maybeSingle();
+    if (loadError) return json(500, { error: loadError.message });
+    if (!order) return json(404, { error: "Order not found." });
+    if (!order.weight_verified_at || !(Number(order.weight_verified_lb) > 0)) {
+      return json(400, { ok: false, error: "Verify the weight first." });
+    }
+    const r = await syncVerifiedWeightToEbay(sb, storeId, order);
+    return json(r.ok || r.skipped ? 200 : 422, {
+      ok: r.ok,
+      skipped: r.skipped || false,
+      error: r.ok ? undefined : r.message,
+      ...r,
+    });
   }
   if (body.action === "void_label") {
     const r = await voidLabel(sb, storeId, id, { force: body.force === true });

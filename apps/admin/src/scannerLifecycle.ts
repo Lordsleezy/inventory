@@ -1,6 +1,8 @@
 /** Own every stream, including one that resolves after the app has gone into the background. */
 export function scannerLifecycle(doc: Document, win: Window, video?: HTMLVideoElement | null, onStop?: () => void) {
-  let stopped = doc.visibilityState !== 'visible';
+  // Start running even if the tab briefly reported hidden during mount (Android permission
+  // dialogs). Visibility listeners still halt a live stream when the app backgrounds.
+  let stopped = false;
   let stream: MediaStream | null = null;
   const stop = () => {
     const wasStopped = stopped;

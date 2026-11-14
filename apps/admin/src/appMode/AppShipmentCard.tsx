@@ -119,6 +119,15 @@ export function AppShipmentCard({
           )}
           {needsWeight && <span className="app-order-problem">Verify weight</span>}
           {!needsWeight && needsLabel && <span className="app-order-problem">Needs label</span>}
+          {!needsWeight && lead.weight_verified_lb != null && (
+            <span className="app-order-meta">Verified {lead.weight_verified_lb} lb</span>
+          )}
+          {!needsWeight && (lead.channel || '').toLowerCase() === 'ebay' && lead.ebay_weight_synced_at && lead.ebay_weight_sync_ok && (
+            <span className="app-order-meta ok-text">Weight sent to eBay ✓</span>
+          )}
+          {!needsWeight && (lead.channel || '').toLowerCase() === 'ebay' && lead.ebay_weight_synced_at && lead.ebay_weight_sync_ok === false && (
+            <span className="app-order-meta bad-text">{lead.ebay_weight_sync_error || 'eBay weight sync failed'}</span>
+          )}
           {lead.tracking_needs_entry && !lead.tracking_number && (
             <span className="app-order-problem">Tracking needed — open to enter</span>
           )}

@@ -755,6 +755,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }, [dialog]);
 
   function openBarcodeCamera() {
+    setTypingOpen(false);
     setCamera(true);
   }
   const chain = useRef<Promise<void>>(Promise.resolve());
@@ -2292,10 +2293,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   }
 
   return <section className={`panel receive-panel receive-v2${appChrome ? ' receive-app' : ''}`}>
-    {(appChrome || storePhoneMode) && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
+    {/* Camera is primary on store phones; keep the Floor keyboard off the scanner and Look up. */}
+    {(appChrome || storePhoneMode) && !camera && <button type="button" className="receive-keyboard-trigger" onClick={() => setTypingOpen(open => !open)} aria-expanded={typingOpen}>
       {typingOpen ? 'Hide Floor keyboard' : '⌨ Floor keyboard'}
     </button>}
-    {typingOpen && <div className="receive-typing-pad" role="group" aria-label="Floor typing pad">
+    {typingOpen && !camera && <div className="receive-typing-pad" role="group" aria-label="Floor typing pad">
       <div className="receive-typing-row">{'1234567890'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => typeReceiveKey(key)}>{key}</button>)}</div>
       <div className="receive-typing-row">{'qwertyuiop'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>
       <div className="receive-typing-row">{'asdfghjkl'.split('').map(key => <button type="button" key={key} onPointerDown={e => e.preventDefault()} onClick={() => { typeReceiveKey(typingShift ? key.toUpperCase() : key); setTypingShift(false); }}>{typingShift ? key.toUpperCase() : key}</button>)}</div>

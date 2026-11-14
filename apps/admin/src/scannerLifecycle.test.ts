@@ -33,3 +33,19 @@ test('pagehide releases the scanner even before visibility changes', () => {
   win.dispatchEvent(new Event('pagehide'));
   assert.equal(stopped, true); assert.equal(owner.stopped, true);
 });
+
+test('a second stop after a visibility halt does not fire onStop again (Close must dismiss itself)', () => {
+  const doc = new EventTarget() as Document;
+  const win = new EventTarget() as Window;
+  let visibility = 'visible';
+  let stops = 0;
+  Object.defineProperty(doc, 'visibilityState', { get: () => visibility });
+  Object.defineProperty(doc, 'activeElement', { get: () => null });
+  const owner = scannerLifecycle(doc, win, null, () => { stops += 1; });
+  visibility = 'hidden';
+  doc.dispatchEvent(new Event('visibilitychange'));
+  assert.equal(owner.stopped, true);
+  assert.equal(stops, 1);
+  owner.stop();
+  assert.equal(stops, 1);
+});

@@ -37,6 +37,23 @@ function beep() {
   navigator.vibrate?.(60);
 }
 
+function cameraErrorMessage(e: unknown) {
+  const name = e instanceof DOMException ? e.name : '';
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return 'Camera permission is blocked. On the Moto: Settings → Apps → Chrome (or Floor) → Permissions → Camera → Allow, then open Receive again.';
+  }
+  if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+    return 'No camera found on this phone.';
+  }
+  if (name === 'NotReadableError' || name === 'TrackStartError') {
+    return 'Camera is in use by another app. Close it, then tap Tap to start camera.';
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    return 'This browser has no camera.';
+  }
+  return 'Camera unavailable. Type the digits under the barcode, or tap Tap to start camera.';
+}
+
 export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onPhoto, banner }: {
   onDetect: (code: string) => void;
   onClose: () => void;
@@ -53,10 +70,19 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
   const [typed, setTyped] = useState('');
   const [torchOn, setTorchOn] = useState(false);
   const [torchOk, setTorchOk] = useState(false);
+  const [needsTap, setNeedsTap] = useState(false);
+  const [starting, setStarting] = useState(true);
   const track = useRef<MediaStreamTrack | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const close = useRef(onClose);
   close.current = onClose;
   const stopCamera = useRef<((dismiss: boolean) => void) | null>(null);
+  const startScanLoop = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    document.body.classList.add('receive-scanner-open');
+    return () => { document.body.classList.remove('receive-scanner-open'); };
+  }, []);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -71,6 +97,7 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
       window.cancelAnimationFrame(frame);
       stream?.getTracks().forEach(item => item.stop());
       stream = null;
+      streamRef.current = null;
       const el = video.current;
       if (el) {
         el.pause();
@@ -85,61 +112,103 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
       userClose.current = dismiss;
       lifecycle.stop();
     };
+
+    const wireVideo = async (next: MediaStream) => {
+      const el = video.current;
+      if (!el) throw new Error('Camera view is missing.');
+      el.srcObject = next;
+      el.muted = true;
+      el.defaultMuted = true;
+      el.playsInline = true;
+      el.setAttribute('playsinline', 'true');
+      el.setAttribute('webkit-playsinline', 'true');
+      el.setAttribute('autoplay', 'true');
+      try {
+        await el.play();
+        setNeedsTap(false);
+      } catch {
+        // Android Chrome often needs a tap after getUserMedia; show an explicit start control.
+        setNeedsTap(true);
+      }
+      const videoTrack = next.getVideoTracks()[0];
+      track.current = videoTrack || null;
+      try {
+        const caps = videoTrack?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+        // iPhone Safari has no torch API — Light stays hidden. Moto/Chrome expose caps.torch.
+        setTorchOk(Boolean(caps?.torch));
+      } catch {
+        setTorchOk(false);
+      }
+    };
+
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    type ReadBarcodes = typeof import('zxing-wasm/reader').readBarcodes;
+    let readBarcodes: ReadBarcodes | null = null;
+    const scan = async () => {
+      const el = video.current;
+      if (stopped || lifecycle.stopped || photoMode.current || !el) return;
+      frame = window.requestAnimationFrame(() => void scan());
+      if (busy || !el.videoWidth || !ctx || !readBarcodes) return;
+      busy = true;
+      try {
+        canvas.width = el.videoWidth;
+        canvas.height = el.videoHeight;
+        ctx.drawImage(el, 0, 0);
+        const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), {
+          formats: [...FORMATS],
+          tryHarder: true,
+          maxNumberOfSymbols: 1,
+        });
+        const code = acceptedBarcode(found.find(row => row.isValid !== false)?.text || '');
+        if (!code || stopped) { if (!code) { last = ''; hits = 0; } return; }
+        if (code === last) hits += 1;
+        else { last = code; hits = 1; }
+        if (hits >= 2 && !stopped) {
+          beep();
+          stopCamera.current?.(false);
+          detect.current(code);
+        }
+      } catch { /* keep scanning */ }
+      finally { busy = false; }
+    };
+    startScanLoop.current = () => {
+      if (stopped || lifecycle.stopped || photoMode.current) return;
+      frame = window.requestAnimationFrame(() => void scan());
+    };
+
     void (async () => {
       try {
-        const { prepareZXingModule, readBarcodes } = await import('zxing-wasm/reader');
-        await prepareZXingModule({ fireImmediately: true });
+        setStarting(true);
+        setErr('');
+        const zxing = await import('zxing-wasm/reader');
+        await zxing.prepareZXingModule({ fireImmediately: true });
+        readBarcodes = zxing.readBarcodes;
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser has no camera.');
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
           audio: false,
         });
-        if (!lifecycle.attach(stream)) return;
         if (stopped) { stream.getTracks().forEach(item => item.stop()); return; }
-        const el = video.current;
-        if (!el) return;
-        el.srcObject = stream;
-        el.setAttribute('playsinline', 'true');
-        el.muted = true;
-        await el.play();
-        const videoTrack = stream.getVideoTracks()[0];
-        track.current = videoTrack || null;
-        const caps = videoTrack?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
-        if (caps?.torch) setTorchOk(true);
-        const scan = async () => {
-          if (stopped || lifecycle.stopped || photoMode.current) return;
-          frame = window.requestAnimationFrame(() => void scan());
-          if (busy || !el.videoWidth || !ctx) return;
-          busy = true;
-          try {
-            canvas.width = el.videoWidth;
-            canvas.height = el.videoHeight;
-            ctx.drawImage(el, 0, 0);
-            const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), {
-              formats: [...FORMATS],
-              tryHarder: true,
-              maxNumberOfSymbols: 1,
-            });
-            const code = acceptedBarcode(found.find(row => row.isValid !== false)?.text || '');
-            if (!code || stopped) { if (!code) { last = ''; hits = 0; } return; }
-            if (code === last) hits += 1;
-            else { last = code; hits = 1; }
-            if (hits >= 2 && !stopped) {
-              beep();
-              stopCamera.current?.(false);
-              detect.current(code);
-            }
-          } catch { /* keep scanning */ }
-          finally { busy = false; }
-        };
-        frame = window.requestAnimationFrame(() => void scan());
+        // attach() releases tracks when the page is already backgrounded. Never fail silently —
+        // Android Chrome shows a gray play icon on an empty <video> with no error text.
+        if (!lifecycle.attach(stream)) {
+          stream = null;
+          streamRef.current = null;
+          setStarting(false);
+          setNeedsTap(true);
+          setErr('Camera paused. Tap Tap to start camera, or type the UPC below.');
+          return;
+        }
+        streamRef.current = stream;
+        if (stopped) { stream.getTracks().forEach(item => item.stop()); return; }
+        await wireVideo(stream);
+        setStarting(false);
+        startScanLoop.current?.();
       } catch (e) {
-        const name = e instanceof DOMException ? e.name : '';
-        setErr(name === 'NotAllowedError'
-          ? 'Allow the camera for Floor, then tap Camera again.'
-          : 'Camera unavailable. Type the digits under the barcode.');
+        setStarting(false);
+        setNeedsTap(true);
+        setErr(cameraErrorMessage(e));
       }
     })();
     return () => {
@@ -149,14 +218,67 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
     };
   }, []);
 
+  async function startFromTap() {
+    setErr('');
+    const el = video.current;
+    const existing = streamRef.current;
+    try {
+      if (existing && el) {
+        el.srcObject = existing;
+        el.muted = true;
+        el.playsInline = true;
+        await el.play();
+        setNeedsTap(false);
+        startScanLoop.current?.();
+        return;
+      }
+      const next = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      });
+      streamRef.current = next;
+      if (!el) throw new Error('Camera view is missing.');
+      el.srcObject = next;
+      el.muted = true;
+      el.defaultMuted = true;
+      el.playsInline = true;
+      el.setAttribute('playsinline', 'true');
+      el.setAttribute('webkit-playsinline', 'true');
+      await el.play();
+      const videoTrack = next.getVideoTracks()[0];
+      track.current = videoTrack || null;
+      try {
+        const caps = videoTrack?.getCapabilities?.() as MediaTrackCapabilities & { torch?: boolean };
+        setTorchOk(Boolean(caps?.torch));
+      } catch {
+        setTorchOk(false);
+      }
+      setNeedsTap(false);
+      startScanLoop.current?.();
+    } catch (e) {
+      setNeedsTap(true);
+      setErr(cameraErrorMessage(e));
+    }
+  }
+
   async function toggleTorch() {
     const videoTrack = track.current;
-    if (!videoTrack) return;
+    if (!videoTrack || !torchOk) return;
     const next = !torchOn;
     try {
       await videoTrack.applyConstraints({ advanced: [{ torch: next } as MediaTrackConstraintSet] });
       setTorchOn(next);
-    } catch { setTorchOk(false); }
+    } catch {
+      // iPhone / browsers without a torch — hide Light instead of leaving a dead button.
+      setTorchOn(false);
+      setTorchOk(false);
+    }
+  }
+
+  /** Always dismiss: lifecycle.stop() is a no-op when the camera already halted (iOS visibility blip). */
+  function dismissScanner() {
+    stopCamera.current?.(true);
+    close.current();
   }
 
   function takePhoto() {
@@ -173,7 +295,10 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
   }
 
   function submitTyped() {
-    const code = acceptedBarcode(typed);
+    const raw = typed.trim();
+    // Empty Look up / Bluetooth Enter with no digits must not show a validation error.
+    if (!raw) { setErr(''); return; }
+    const code = acceptedBarcode(raw);
     if (!code) { setErr('That is not a valid UPC or EAN.'); return; }
     beep();
     stopCamera.current?.(false);
@@ -188,14 +313,22 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
         {mode === 'photo' ? <span className="receive-scanner-caption">Take picture of item for identification</span> : <span className="receive-scanner-line" />}
       </div>
       <div className="receive-scanner-bar">
-        <button type="button" onClick={() => stopCamera.current?.(true)}>Close</button>
-        {torchOk && <button type="button" onClick={() => void toggleTorch()}>{torchOn ? 'Light off' : 'Light'}</button>}
+        <button type="button" onClick={dismissScanner}>Close</button>
+        {torchOk ? (
+          <button type="button" onClick={() => void toggleTorch()}>{torchOn ? 'Light off' : 'Light'}</button>
+        ) : null}
         {mode === 'photo' && <button type="button" onClick={takePhoto}>OK</button>}
       </div>
       {banner}
+      {starting && !err && !needsTap && <p className="receive-scanner-status" role="status">Starting camera…</p>}
+      {needsTap && (
+        <button type="button" className="receive-scanner-start" onClick={() => void startFromTap()}>
+          Tap to start camera
+        </button>
+      )}
       {err && <p className="receive-scanner-error" role="alert">{err}</p>}
       {mode === 'barcode' && <form className="receive-scanner-type" onSubmit={event => { event.preventDefault(); submitTyped(); }}>
-        <label>Type UPC<input inputMode="numeric" autoComplete="off" value={typed} onChange={event => setTyped(event.target.value)} /></label>
+        <label>Type UPC<input inputMode="numeric" autoComplete="off" value={typed} onChange={event => { setTyped(event.target.value); if (err) setErr(''); }} /></label>
         <button type="submit">Look up</button>
       </form>}
     </div>,

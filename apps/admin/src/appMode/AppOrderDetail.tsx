@@ -287,6 +287,12 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
                 Was <span className="app-order-weight-old">{order.weight_on_file_lb} lb</span>
               </p>
             )}
+            {(order.channel || '').toLowerCase() === 'ebay' && order.ebay_weight_synced_at && order.ebay_weight_sync_ok && (
+              <p className="app-order-status-sub ok-text">Weight sent to eBay ✓</p>
+            )}
+            {(order.channel || '').toLowerCase() === 'ebay' && order.ebay_weight_synced_at && order.ebay_weight_sync_ok === false && (
+              <p className="app-order-status-sub bad-text">{order.ebay_weight_sync_error || 'eBay weight sync failed'}</p>
+            )}
           </div>
         )}
 
