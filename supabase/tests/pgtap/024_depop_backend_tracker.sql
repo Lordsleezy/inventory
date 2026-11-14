@@ -12,7 +12,9 @@ end $$;
 select set_config('request.jwt.claim.role','service_role',true);select set_config('request.jwt.claim.sub','',true);
 set local role service_role;
 select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93001','https://www.depop.com/products/test-unit/',2500,now(),'test listing agent')$q$,current_setting('depop_test.store')),'service credential records listing without portal identity');
+select is((select count(*)::int from public.depop_live_posts where sku='93001'),1,'a recorded URL is kept as its own shop post');
 select lives_ok(format($q$select public.floor_depop_record_listing(%L,'93001',null,null,null,'historical import')$q$,current_setting('depop_test.store')),'retry/import is idempotent and permits unknown metadata');
+select is((select count(*)::int from public.depop_live_posts where sku='93001'),1,'missing URL does not erase the shop post');
 select lives_ok($q$select public.portal_depop_add_listing('93001','https://www.depop.com/products/test-unit/',2500,null)$q$,'original Add listing RPC also accepts service-role agents without portal identity');
 reset role;
 select is((select count(*)::int from public.listings where sku='93001'),1,'one canonical row, never duplicated');
@@ -64,5 +66,19 @@ select lives_ok($q$select public.portal_depop_record_sale('93006',1000,100,null,
 select is((select qty_on_hand from public.units where sku='93006'),0,'stock is gone');
 select is((select status from public.listings where sku='93006' and channel='depop'),'listed','last sale stays on the list');
 select is((select depop_needs_removal from public.listings where sku='93006' and channel='depop'),true,'last sale flags removal');
+
+delete from public.depop_live_posts where store_id=current_setting('depop_test.store')::uuid;
+insert into public.depop_shop_snapshot(store_id) values(current_setting('depop_test.store')::uuid);
+insert into public.depop_live_posts(store_id,listing_url,sku,price_cents) values
+ (current_setting('depop_test.store')::uuid,'https://www.depop.com/products/fixture-a/','93006',1000),
+ (current_setting('depop_test.store')::uuid,'https://www.depop.com/products/fixture-b/','93006',1100),
+ (current_setting('depop_test.store')::uuid,'https://www.depop.com/products/shade-no-sku/',null,2500);
+select is((select count(*)::int from public.portal_depop_live_listings()),3,'shop snapshot lists every live post, including a second URL and a post with no SKU');
+select lives_ok($q$select public.portal_depop_remove_post('https://www.depop.com/products/fixture-b/')$q$,'one shop URL can be removed');
+select is((select count(*)::int from public.portal_depop_live_listings()),2,'the other URL for that SKU stays on the list');
+select is((select status from public.listings where sku='93006' and channel='depop'),'listed','SKU stays listed while another Depop URL remains');
+select lives_ok($q$select public.portal_depop_remove_post('https://www.depop.com/products/fixture-a/')$q$,'removing the last URL for a SKU delists it');
+select is((select status from public.listings where sku='93006' and channel='depop'),'delisted','last shop URL remove delists the SKU');
+select is((select count(*)::int from public.portal_depop_live_listings()),1,'a live post with no Floor SKU still shows');
 
 select * from finish();rollback;

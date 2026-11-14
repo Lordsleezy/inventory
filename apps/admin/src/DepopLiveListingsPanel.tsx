@@ -42,7 +42,7 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
     const q = search.trim().toLowerCase();
     const rank = (row: Row) => (requiresRemoval(row) ? 0 : 1);
     return (rows || [])
-      .filter(row => !q || row.sku.toLowerCase().includes(q))
+      .filter(row => !q || row.sku.toLowerCase().includes(q) || (row.listing_url || '').toLowerCase().includes(q))
       .slice()
       .sort((a, b) => rank(a) - rank(b) || a.sku.localeCompare(b.sku));
   }, [rows, search]);
@@ -59,11 +59,14 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
     setNotice(`SKU ${picked.sku} added to the live Depop list.`); setAdding(false); setPicked(null); setQuery(''); setUrl(''); setPrice(''); setListedOn(todayLA()); await load();
   }
   async function remove(row: Row) {
-    if (!window.confirm(`Remove SKU ${row.sku} from the live Depop list?`)) return;
+    const label = row.sku ? `SKU ${row.sku}` : 'this listing';
+    if (!window.confirm(`Remove ${label} from the live Depop list?`)) return;
     setBusy(true); setError('');
-    const { error: e } = await client.rpc('portal_depop_remove_listing', { p_sku: row.sku });
+    const { error: e } = row.listing_url
+      ? await client.rpc('portal_depop_remove_post', { p_url: row.listing_url })
+      : await client.rpc('portal_depop_remove_listing', { p_sku: row.sku });
     setBusy(false); if (e) { setError(errText(e)); return; }
-    setNotice(`SKU ${row.sku} removed from the live Depop list.`); await load();
+    setNotice(`${label} removed from the live Depop list.`); await load();
   }
 
   const cls = variant === 'app' ? 'depop-live depop-live-app' : 'depop-live';
@@ -85,12 +88,12 @@ export function DepopLiveListingsPanel({ client, money, variant }: { client: Sup
     {!adding && !selected && <section className="panel"><label>Search SKU<input type="search" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search SKU" /></label>
       {rows === null ? <p className="hint">Loading Depop SKUs…</p> : shown.length === 0 ? <div className="empty">No matching live Depop SKUs.</div> : <>
         {needsRemoval.length > 0 && <div className="depop-needs-head">Needs removal</div>}
-        {needsRemoval.length > 0 && <div className="depop-sku-list has-needs">{needsRemoval.map(row => <div className="depop-sku-row needs-removal" key={row.sku}>
-          <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong><span>Needs removal</span><b aria-hidden="true">›</b></button>
+        {needsRemoval.length > 0 && <div className="depop-sku-list has-needs">{needsRemoval.map(row => <div className="depop-sku-row needs-removal" key={row.listing_url || row.sku}>
+          <button type="button" className="depop-sku-open" onClick={() => { if (!row.sku) return; setError(''); setSelected(row); }}><strong>{row.sku || 'No SKU'}</strong>{row.price_cents != null && <small>{money(row.price_cents)}</small>}<span>Needs removal</span><b aria-hidden="true">›</b></button>
           <button type="button" className="text-button depop-remove" disabled={busy} onClick={() => void remove(row)}>Remove</button>
         </div>)}</div>}
-        {rest.length > 0 && <div className="depop-sku-list">{rest.map(row => <div className="depop-sku-row" key={row.sku}>
-            <button type="button" className="depop-sku-open" onClick={() => { setError(''); setSelected(row); }}><strong>{row.sku}</strong><b aria-hidden="true">›</b></button>
+        {rest.length > 0 && <div className="depop-sku-list">{rest.map(row => <div className="depop-sku-row" key={row.listing_url || row.sku}>
+            <button type="button" className="depop-sku-open" onClick={() => { if (!row.sku) return; setError(''); setSelected(row); }}><strong>{row.sku || 'No SKU'}</strong>{row.price_cents != null && <small>{money(row.price_cents)}</small>}<b aria-hidden="true">›</b></button>
             <button type="button" className="text-button depop-remove" disabled={busy} onClick={() => void remove(row)}>Remove</button>
           </div>)}</div>}
       </>}
