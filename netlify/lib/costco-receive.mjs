@@ -227,6 +227,33 @@ function packageFrom(product, amazon, pinned) {
   };
 }
 
+/** Item size, not the shipping carton. A matched catalog measurement wins over a saved guess. */
+function itemSize(product, amazon, upcitemdb) {
+  const stored = product?.aspects && typeof product.aspects === "object" ? product.aspects : {};
+  const saved = stored.item_dims && typeof stored.item_dims === "object" ? stored.item_dims : {};
+  const catalog = amazon?.item || {};
+  const listed = upcitemdb?.item || {};
+  const trusted = amazon?.identifier_match === true;
+  const length = numberOrNull(catalog.length_in);
+  const width = numberOrNull(catalog.width_in);
+  const height = numberOrNull(catalog.height_in);
+  const placeholder = !trusted && length && width && height && length === width && width === height;
+  const pick = (aspectKey, itemKey) => {
+    if (/estimat|\bai\b|gemini/i.test(measurementSource(product, aspectKey))) {
+      return placeholder ? null : (numberOrNull(catalog[itemKey]) || numberOrNull(listed[itemKey]));
+    }
+    return numberOrNull(stored[aspectKey]) || numberOrNull(saved[itemKey])
+      || (placeholder ? null : numberOrNull(catalog[itemKey]))
+      || numberOrNull(listed[itemKey]);
+  };
+  return {
+    product_depth_in: pick("product_depth_in", "length_in"),
+    product_width_in: pick("product_width_in", "width_in"),
+    product_height_in: pick("product_height_in", "height_in"),
+    product_weight_lb: pick("product_weight_lb", "weight_lb"),
+  };
+}
+
 function itemAspects(product, amazon, pinned) {
   const item = pinned?.item || product?.aspects?.item_dims || amazon?.item || {};
   const aspects = {};
@@ -267,6 +294,9 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
     weight_lb: catalogBox.weight_lb || numberOrNull(expandedPkg.weight_lb) || numberOrNull(listed.weight_lb),
   };
   const aspects = useCatalog ? itemAspects(product, amazon, pinned) : specificsFrom(enrich?.specifics);
+  for (const [key, value] of Object.entries(itemSize(product, amazon, upcitemdb))) {
+    if (value) aspects[key] = String(value);
+  }
   const pack = packCountOf(line?.description, enrich?.variant_note, product?.aspects);
   const retail = stripMoney ? null : (Number.isInteger(line?.unit_retail_cents) ? line.unit_retail_cents : null);
   const gtin = decision.internal ? null : (normalizeGtin(line?.upc_normalized || line?.upc_raw).gtin14 || null);
