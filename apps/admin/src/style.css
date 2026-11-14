@@ -613,6 +613,9 @@ html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 .manifest-coverage .is-missing{color:#e10600;font-weight:700}
 .manifest-coverage-filters{display:flex;gap:8px;margin-top:8px}
 .receive-scanner{position:fixed;inset:0;z-index:10050;background:#000;color:#fff;overflow:hidden}
+body.receive-scanner-open .receive-keyboard-trigger,
+body.receive-scanner-open .receive-typing-pad,
+body.receive-scanner-open .app-scanner-status{display:none!important}
 /* iOS Safari: fullscreen <video> can sit above later siblings and eat taps — keep it decorative. */
 .receive-scanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;pointer-events:none;z-index:0}
 .receive-scanner-shade{position:absolute;inset:0;z-index:1;background:linear-gradient(#000,transparent 18%,transparent 62%,#000);pointer-events:none}
@@ -620,6 +623,8 @@ html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 .receive-scanner-line{position:absolute;left:0;right:0;height:2px;background:#e10600;animation:receive-scan 1.4s ease-in-out infinite;pointer-events:none}
 .receive-scanner-caption{position:absolute;left:8px;right:8px;bottom:8px;color:#fff;font-size:13px;text-align:center;pointer-events:none}
 .receive-scanner .manifest-receive-reference{position:absolute;left:16px;right:16px;top:calc(64px + env(safe-area-inset-top, 0px));z-index:4;background:#000;pointer-events:auto}
+.receive-scanner-start{position:absolute;left:50%;top:42%;z-index:6;transform:translate(-50%,-50%);min-height:52px;padding:14px 22px;background:#fff;color:#000;border:0;border-radius:0;font:inherit;font-weight:700;touch-action:manipulation}
+.receive-scanner-status{position:absolute;left:16px;right:16px;top:calc(72px + env(safe-area-inset-top, 0px));z-index:4;color:#fff;font-weight:600;pointer-events:none;text-align:center}
 .receive-steps-host.panel{padding:0;margin:0;max-width:none;border:0;background:transparent}
 .receive-steps{position:fixed;z-index:30;top:0;right:0;left:0;bottom:calc(49px + env(safe-area-inset-bottom, 0px));background:#000;color:#fff;display:flex;flex-direction:column;padding:0;min-height:0}
 .receive-steps p,.receive-steps label,.receive-steps h2{color:#fff}
