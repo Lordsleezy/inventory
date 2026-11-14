@@ -80,13 +80,17 @@ export function ReceiveWizard({
   const seen = useRef<string | null>(null);
   const returnToReview = useRef(false);
 
+  const manifestRetailCents = retailCents ?? manifestReference?.reference?.retail_cents ?? null;
+  const usesManifestPrice = (form.condition === 'New' || form.condition === 'Open box')
+    && manifestRetailCents != null && manifestRetailCents > 0;
   const plan = useMemo(() => receiveStepPlan({
     doNotList,
     brand: form.unbranded ? 'Unbranded' : form.brand,
     title: form.title,
     hasDims: [form.length, form.width, form.height, form.weight].every(value => Number(value) > 0),
     hasStockMatch: stockMatches.length > 0,
-  }), [doNotList, form, stockMatches.length]);
+    manifestPrice: usesManifestPrice,
+  }), [doNotList, form, stockMatches.length, usesManifestPrice]);
 
   useEffect(() => {
     document.body.classList.add('receive-steps-open');
@@ -139,10 +143,16 @@ export function ReceiveWizard({
     else setLocation('');
   }
 
-  const manifestRetailCents = retailCents ?? manifestReference?.reference?.retail_cents ?? null;
   const retail = manifestRetailCents != null
     ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(manifestRetailCents / 100)
     : '';
+  const retailAsk = manifestRetailCents != null && manifestRetailCents > 0 ? (manifestRetailCents / 100).toFixed(2) : '';
+  function pickCondition(value: string) {
+    update('condition', value);
+    const covered = value === 'New' || value === 'Open box';
+    if (covered && retailAsk) update('ask', retailAsk);
+    else if (retailAsk && form.ask === retailAsk) update('ask', '');
+  }
   const nav = (
     <div className="receive-step-nav">
       <button type="button" onClick={() => go(-1)}>Back</button>
@@ -237,7 +247,7 @@ export function ReceiveWizard({
           <div role="radiogroup" aria-label="Condition">
             {CONDITIONS.map(([value, label]) => (
               <label key={value} className="receive-step-choice">
-                <input type="radio" name="condition" checked={form.condition === value} onChange={() => update('condition', value)} />
+                <input type="radio" name="condition" checked={form.condition === value} onChange={() => pickCondition(value)} />
                 {label}
               </label>
             ))}

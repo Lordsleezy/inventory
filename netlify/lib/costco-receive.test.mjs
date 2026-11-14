@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCostcoReceive, candidateTitles, classifyCostcoLine, nearestManifestLine, stockImagesForLine } from "./costco-receive.mjs";
+import { buildCostcoReceive, candidateTitles, classifyCostcoLine, manifestItemFromText, nearestManifestLine, stockImagesForLine } from "./costco-receive.mjs";
 
 const line = {
   tcin: "3858210",
@@ -157,6 +157,41 @@ test("a box saved for this barcode fills even when the catalog title is not trus
   assert.match(card.merged.title, /INFINITY X1/);
   assert.equal(card.merged.title.includes("other light"), false);
   assert.deepEqual(card.merged.package, { length_in: 10.47, width_in: 10.12, height_in: 2.91, weight_lb: 2.27 });
+});
+
+test("an untrusted catalog box fills when this barcode has no saved box", () => {
+  const card = buildCostcoReceive({
+    line: { ...line, tcin: "1848535", item_number: "1848535", description: "KOHLER TERZET WIDE BNCKEL", upc_normalized: "195711178039" },
+    enrich: { status: "partial", why: "Several Amazon results match: faucet one | faucet two" },
+    product: { title: "Kohler KOHLER TERZET WIDE BNCKEL", package_length_in: null, dim_sources: {} },
+    amazon: {
+      found: true,
+      identifier_match: false,
+      title: "Kohler Terzet Widespread Bathroom Sink Faucet",
+      package: { length_in: 22.68, width_in: 9.76, height_in: 3.7, weight_lb: 3.68 },
+      item: { length_in: 18, width_in: 18, height_in: 18, weight_lb: 3 },
+    },
+  });
+  assert.match(card.merged.title, /KOHLER TERZET/);
+  assert.equal(card.merged.title.includes("Widespread"), false);
+  assert.deepEqual(card.merged.package, { length_in: 22.68, width_in: 9.76, height_in: 3.7, weight_lb: 3.68 });
+});
+
+test("a listed package fills a side the catalog left blank", () => {
+  const card = buildCostcoReceive({
+    line,
+    product: { title: "Philips Sonicare" },
+    amazon: { found: true, identifier_match: false, package: { length_in: 8, width_in: 3, height_in: 2, weight_lb: null } },
+    upcitemdb: { package: { weight_lb: 1.2 } },
+  });
+  assert.deepEqual(card.merged.package, { length_in: 8, width_in: 3, height_in: 2, weight_lb: 1.2 });
+});
+
+test("a Costco page names one manifest item, and two names name none", () => {
+  const numbers = ["1848535", "1781269"];
+  assert.equal(manifestItemFromText('https://www.costco.com/p/-/kohler-terzet/4000287300 "sku":"1848535" Item 1848535', numbers), "1848535");
+  assert.equal(manifestItemFromText("Item 1848535 and Item 1781269", numbers), null);
+  assert.equal(manifestItemFromText("Item 9999999", numbers), null);
 });
 
 test("an estimated box is not treated as a measurement", () => {

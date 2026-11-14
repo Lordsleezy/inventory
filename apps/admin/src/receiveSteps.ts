@@ -30,13 +30,15 @@ export function receiveStepPlan(input: {
   title: string;
   hasDims: boolean;
   hasStockMatch: boolean;
+  /** New or Open box, and the manifest already has a retail price. */
+  manifestPrice?: boolean;
 }): ReceiveStepId[] {
   const steps: ReceiveStepId[] = ['confirm', 'photo'];
   if (!input.brand.trim()) steps.push('brand');
   if (!input.doNotList && !input.title.trim()) steps.push('title');
   steps.push('condition');
   if (!input.doNotList) {
-    steps.push('price');
+    if (!input.manifestPrice) steps.push('price');
     if (!input.hasDims) steps.push('dims');
     if (input.hasStockMatch) steps.push('stock');
   }

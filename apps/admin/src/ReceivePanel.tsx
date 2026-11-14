@@ -1329,8 +1329,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     activeScan.current = current.id;
     const scanId = current.id;
     if (!r?.store_label && !r?.receive?.internal && m?.images?.[0]) void stageStockPhoto(String(m.images[0]), current.upc, scanId);
-    if (!prewarmed && !r?.store_label && !isTrueCatalogMiss(r) && [initial.length, initial.width, initial.height, initial.weight,
-      initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v))
+    const missingBox = [initial.length, initial.width, initial.height, initial.weight].some(v => !v);
+    const missingProduct = [initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v);
+    if (!r?.store_label && !isTrueCatalogMiss(r) && (missingBox || (!prewarmed && missingProduct)))
       void findPhotoDimensions(current.upc, scanId, {title:m?.title,brand:m?.brand,model:m?.model,size:initial.size});
     void findDups(upcVariants(current.upc, r)).then(d => { if (mounted.current && activeScan.current === scanId) setDups(d); });
     // Restore photos if the camera app killed the PWA mid-capture for this scan.
