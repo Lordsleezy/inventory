@@ -63,13 +63,15 @@ async function open(scenario) {
   const fixtureReferences = Object.fromEntries(manifestLines.map(line => [line.upc_normalized, fixtureReference(line.upc_normalized)]));
   await page.evaluate(value => { window.__scenario = value; }, { ...scenario, fixtureReferences });
   await page.addScriptTag({ content: outputFiles[0].text });
-  const marker = scenario.initialUpc === null ? 'input[placeholder="Scan or type · Enter"]' : scenario.staff ? 'text=Is this it?' : 'input[placeholder="0.00"]';
+  const marker = scenario.initialUpc === null
+    ? (scenario.staff ? 'text=Type UPC' : 'input[placeholder="Scan or type · Enter"]')
+    : scenario.staff ? 'text=Is this it?' : 'input[placeholder="0.00"]';
   await page.locator(marker).waitFor();
   return page;
 }
 async function scan(upc, scenario) {
   const page = await open({ ...scenario, initialUpc: null });
-  const input = page.getByPlaceholder('Scan or type · Enter');
+  const input = scenario.staff ? page.getByLabel('Type UPC') : page.getByPlaceholder('Scan or type · Enter');
   await input.fill(upc);
   await input.press('Enter');
   if (scenario.staff) await page.getByText(/Is this it\?|Take picture of item for identification/).waitFor();
@@ -157,7 +159,7 @@ try {
       if (isStaff) assert.equal(await page.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'clerk cost control stays hidden');
       await page.close();
     }
-    const noMatch = await scan('999999999999', { staff: isStaff, useFixtureReference: true });
+    const noMatch = await scan(isStaff ? '012345678905' : '999999999999', { staff: isStaff, useFixtureReference: true });
     assert.equal(await noMatch.locator('.manifest-receive-reference').count(), 0, 'unlisted UPC has no manifest retail row');
     await noMatch.close();
   }
