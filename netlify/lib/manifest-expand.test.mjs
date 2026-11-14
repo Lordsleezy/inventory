@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { acceptedExpansion, categoryFits, manufacturerUpc } from "./manifest-expand.mjs";
+import { acceptedExpansion, categoryFits, chooseStockPhoto, manufacturerUpc } from "./manifest-expand.mjs";
 import { identityCanPick } from "./manifest-pick.mjs";
 
 test("a longer name that shares the manifest words is kept, and a distributor is not a brand", () => {
@@ -32,6 +32,26 @@ test("a guessed name that shares no words is dropped", () => {
   assert.equal(kept.expanded_brand, "Koda");
   assert.equal(kept.manufacturer_upc, "");
   assert.equal(manufacturerUpc("499912345678"), "");
+});
+
+test("a stock photo must match the manifest line", () => {
+  const line = "DISNEY HALLOWEEN VILLAGE";
+  assert.equal(chooseStockPhoto(line, [
+    { url: "https://m.media-amazon.com/images/I/wrong.jpg", title: "Moments in Time" },
+    { url: "https://i.ebayimg.com/images/g/village.jpg", title: "Disney Halloween Village" },
+  ]), "https://i.ebayimg.com/images/g/village.jpg");
+  assert.equal(chooseStockPhoto(line, [
+    { url: "https://m.media-amazon.com/images/I/right.jpg", title: "Something else", trusted: true },
+  ]), "https://m.media-amazon.com/images/I/right.jpg");
+  assert.equal(chooseStockPhoto("STANDBY SHOE BOX 4PK", [
+    { url: "https://gdx-assets.costco.com/box.avif", title: "Stackable Shoebox 4-pack" },
+  ]), "https://gdx-assets.costco.com/box.avif");
+  assert.equal(chooseStockPhoto("INSINKERATOR C3000", [
+    { url: "https://www.insinkerator.com/resource/image/72796/portrait_ratio1x1/345/345/abc/.c3000.jpg", title: "Performance C3000 Garbage Disposal" },
+  ]), "https://www.insinkerator.com/resource/image/72796/portrait_ratio1x1/345/345/abc/.c3000.jpg");
+  assert.equal(chooseStockPhoto("EPSON ECOTANK ET3750SE", [
+    { url: "https://mediaserver.goepson.com/adaptivemedia/rendition?id=et3750", title: "WorkForce ET-3750 EcoTank Printer" },
+  ]), "https://mediaserver.goepson.com/adaptivemedia/rendition?id=et3750");
 });
 
 test("an unidentified photo does not pick a manifest line", () => {

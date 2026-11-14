@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildCostcoReceive, candidateTitles, classifyCostcoLine, nearestManifestLine } from "./costco-receive.mjs";
+import { buildCostcoReceive, candidateTitles, classifyCostcoLine, nearestManifestLine, stockImagesForLine } from "./costco-receive.mjs";
 
 const line = {
   tcin: "3858210",
@@ -138,6 +138,27 @@ test("an expanded name replaces the truncated manifest stub without overriding t
   assert.match(card.merged.title, /Rolling Massager/);
   assert.equal(card.merged.brand, "Philips Sonicare");
   assert.equal(card.receive.ebay_category_id, null);
+});
+
+test("a catalog title that only borrows the manifest words is not a stock photo", () => {
+  const images = stockImagesForLine({
+    line: { description: "DISNEY HALLOWEEN VILLAGE", brand: "" },
+    product: { title: "MOMENTS IN TIME Disney Halloween Village 12-Piece", images: ["https://m.media-amazon.com/images/I/wrong.jpg"] },
+    amazon: { identifier_match: false },
+    expandedTitle: "Disney Halloween Village, 12-piece Set",
+  });
+  assert.deepEqual(images, []);
+});
+
+test("a fuzzy catalog photo is not the stock photo, and a stored match is", () => {
+  const images = stockImagesForLine({
+    line,
+    enrich: { images: ["https://i.ebayimg.com/images/g/disney.jpg"] },
+    product: { title: "Moments in Time", images: ["https://m.media-amazon.com/images/I/wrong.jpg"] },
+    amazon: { found: true, identifier_match: false },
+    expandedTitle: "Disney Halloween Village",
+  });
+  assert.deepEqual(images, ["https://i.ebayimg.com/images/g/disney.jpg"]);
 });
 
 test("a unique barcode within 3 digits suggests that line, and a tie does not", () => {

@@ -373,6 +373,23 @@ export async function receiveBrowsePrices(identity) {
   return prices;
 }
 
+/** Listing photos from an eBay Browse search by the exact barcode. */
+export async function browseGtinImages(gtin) {
+  const code = String(gtin || "").replace(/\D/g, "");
+  if (!/^\d{8,14}$/.test(code)) return [];
+  const { api, token } = await applicationToken();
+  const response = await fetch(`${api}/buy/browse/v1/item_summary/search?gtin=${encodeURIComponent(code)}&limit=10`, {
+    headers: { Authorization: `Bearer ${token}`, "X-EBAY-C-MARKETPLACE-ID": process.env.EBAY_MARKETPLACE_ID || "EBAY_US" },
+    signal: AbortSignal.timeout(12000),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) return [];
+  return (body.itemSummaries || []).map((item) => ({
+    title: String(item.title || ""),
+    url: String(item.image?.imageUrl || ""),
+  })).filter((row) => /^https:\/\//i.test(row.url));
+}
+
 export async function ebayCategoriesForGtin(gtin) {
   const { api, token } = await applicationToken();
   const response = await fetch(`${api}/buy/browse/v1/item_summary/search?gtin=${encodeURIComponent(gtin)}&limit=20`, {

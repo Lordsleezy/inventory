@@ -2213,6 +2213,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         update={(key, value) => setForm(prev => ({ ...prev, [key]: value }))}
         doNotList={doNotList} setDoNotList={setDoNotList}
         hasPhoto={files.length > 0 || stagedPhotoPaths.length > 0}
+        photoPreviews={previews}
         onPhoto={file => { const list = new DataTransfer(); list.items.add(file); void ingestFiles(list.files); }}
         onIdentify={file => identifyMissPhoto(file)}
         locations={receiveLocations} location={selectedLocation} setLocation={setSelectedLocation}

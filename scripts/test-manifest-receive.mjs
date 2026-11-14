@@ -4,7 +4,8 @@ import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { parseManifestLines } from '../apps/admin/src/manifestLines.ts';
-const { chromium } = await import(process.env.MANIFEST_PLAYWRIGHT_PATH ? pathToFileURL(process.env.MANIFEST_PLAYWRIGHT_PATH).href : 'playwright');
+const playwright = await import(process.env.MANIFEST_PLAYWRIGHT_PATH ? pathToFileURL(process.env.MANIFEST_PLAYWRIGHT_PATH).href : 'playwright');
+const browserType = process.env.MANIFEST_BROWSER === 'webkit' ? playwright.webkit : playwright.chromium;
 const manifestLines = parseManifestLines(await readFile(new URL('../apps/admin/test-fixtures/manifest-receive-upcs.csv', import.meta.url), 'utf8'));
 function fixtureReference(upc) {
   const matches = manifestLines.filter(line => line.upc_normalized === upc);
@@ -53,13 +54,15 @@ const { outputFiles } = await build({
     createRoot(document.getElementById('root')).render(<ReceivePanel client={client} storeId="10000000-0000-0000-0000-000000000001" accessToken="test-only" onSaved={() => {}} staffMode={!!scenario.staff} storePhoneMode={!!scenario.staff} appChrome={!!scenario.staff} initialUpc={initialUpc} />);
   ` }, bundle: true, write: false, platform: 'browser', format: 'iife', external: ['@techstark/opencv-js'], jsx: 'automatic', define: { 'import.meta.env': '{}' },
 });
-const browser = await chromium.launch({ headless: true, ...(process.env.MANIFEST_CHROMIUM_PATH ? { executablePath: process.env.MANIFEST_CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
+const browser = await browserType.launch({ headless: true, ...(process.env.MANIFEST_CHROMIUM_PATH ? { executablePath: process.env.MANIFEST_CHROMIUM_PATH } : {}), args: ['--no-sandbox'] });
 const ref = { retail_cents: 4999, manifest_name: 'Oct 28 B-Stock load', manifest_on: '2026-10-28', warnings: [] };
 async function open(scenario) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   page.on('pageerror', error => console.error('Receive test page error:', error.message));
   await page.route('**/*', route => route.fulfill({ contentType: 'text/html', body: '<div id="root"></div>' }));
   await page.goto('https://floor-receive.test/');
+  await page.addStyleTag({ content: await readFile(new URL('../apps/admin/src/style.css', import.meta.url), 'utf8') });
+  await page.evaluate(() => document.documentElement.classList.add('app-mode'));
   const fixtureReferences = Object.fromEntries(manifestLines.map(line => [line.upc_normalized, fixtureReference(line.upc_normalized)]));
   await page.evaluate(value => { window.__scenario = value; }, { ...scenario, fixtureReferences });
   await page.addScriptTag({ content: outputFiles[0].text });
@@ -80,12 +83,37 @@ async function scan(upc, scenario) {
   return page;
 }
 async function reachPrice(page) {
+  const yes = await page.getByRole('button', { name: "Yes, that's it" }).boundingBox();
+  const no = await page.getByRole('button', { name: 'No', exact: true }).boundingBox();
+  assert.ok(yes && no && no.x >= yes.x + yes.width + 8, 'Yes and No have a gap');
+  const header = await page.locator('.receive-step-top').boundingBox();
+  assert.ok(header && header.y <= 20, 'the step header sits at the top');
   await page.getByRole('button', { name: "Yes, that's it" }).click();
+  const take = page.locator('.receive-photo-take');
+  const takeBox = await take.boundingBox();
+  const libraryBox = await page.locator('.receive-photo-library').boundingBox();
+  assert.ok(takeBox && takeBox.height >= 48, 'Take photo is a button');
+  assert.ok(libraryBox && libraryBox.y >= takeBox.y + takeBox.height - 1, 'Choose from library is on its own row');
+  assert.equal(await take.locator('input').getAttribute('capture'), 'environment');
+  assert.equal(await take.evaluate(label => {
+    const rect = label.getBoundingClientRect();
+    return document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)?.tagName;
+  }), 'INPUT', 'the tap lands on the camera input');
+  const nav = await page.locator('.receive-step-nav').boundingBox();
+  assert.ok(nav && nav.y > 640, 'Back and Next sit at the bottom');
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'item.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(4096, 1) });
   await page.getByRole('button', { name: 'Next' }).click();
   await page.getByRole('radio', { name: 'New' }).check();
+  await pinned(page);
   await page.getByRole('button', { name: 'Next' }).click();
   await page.locator('input[placeholder="0.00"]').waitFor();
+  await pinned(page);
+}
+async function pinned(page) {
+  const header = await page.locator('.receive-step-top').boundingBox();
+  const nav = await page.locator('.receive-step-nav').boundingBox();
+  assert.ok(header && header.y <= 20, 'the step header sits at the top');
+  assert.ok(nav && nav.y > 640 && nav.y < 800, 'the step buttons sit at the bottom');
 }
 async function fields(page) {
   return page.locator('input:not([type="file"]), textarea, select').evaluateAll(elements => elements.map(e => ({ type: e.type, value: e.value, checked: e.checked })));
@@ -138,7 +166,9 @@ try {
   await repeat.getByLabel('Width').fill('1');
   await repeat.getByLabel('Height').fill('1');
   await repeat.getByLabel('Weight, lb').fill('1');
+  await pinned(repeat);
   await repeat.getByRole('button', { name: 'Next' }).click();
+  await pinned(repeat);
   await repeat.getByRole('button', { name: 'Add to stock' }).click();
   await repeat.waitForFunction(() => window.__calls.some(call => call.name === 'portal_stock_receive_add' && call.args?.p_sku === '11500' && call.args?.p_quantity === 1));
   assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'stock reuse cannot expose clerk cost');

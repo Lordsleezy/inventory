@@ -89,9 +89,19 @@ function allowedPhoto(url) {
   return /images-amazon\.com|media-amazon\.com|ssl-images-amazon\.com|m\.media-amazon\.com|images\.philips\.com|mediaserver\.goepson\.com/i.test(String(url || ""));
 }
 
+function httpsImages(list) {
+  return [...new Set((list || []).filter((url) => typeof url === "string" && /^https:\/\//i.test(url) && !/\/1x1[./]|pixel|placeholder|spacer|blank\./i.test(url)))].slice(0, 6);
+}
+
 function photosOf(product, amazon) {
-  const urls = [...(product?.images || []), ...(amazon?.images || [])].filter(allowedPhoto);
-  return [...new Set(urls)].slice(0, 6);
+  return httpsImages([...(product?.images || []), ...(amazon?.images || [])]);
+}
+
+/** Stock photos for this manifest line. A fuzzy catalog picture is left out, even when its title repeats the manifest words. */
+export function stockImagesForLine({ enrich = {}, product = null, amazon = null, trusted = false }) {
+  const stored = httpsImages(enrich?.images);
+  const catalog = trusted || amazon?.identifier_match === true ? photosOf(product, amazon) : [];
+  return [...new Set([...stored, ...catalog])].slice(0, 6);
 }
 
 export function conflictFor(itemNumber, enrich) {
@@ -191,8 +201,10 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
   const model = clean(useCatalog ? (product?.model || pinned?.model || amazon?.model || enrich?.model || enrich?.expanded_model) : (enrich?.expanded_model || ""));
   const description = clean(useCatalog ? (product?.description || pinned?.description || amazon?.description || line?.description) : (enrich?.expanded_description || line?.description || ""));
   const features = useCatalog ? (product?.features || pinned?.features || amazon?.features || []).filter((row) => typeof row === "string").slice(0, 12) : [];
-  const expandedImages = Array.isArray(enrich?.images) ? enrich.images.filter((url) => typeof url === "string" && /^https?:/i.test(url)).slice(0, 6) : [];
-  const images = useCatalog ? (pinned?.images || photosOf(product, amazon)) : expandedImages;
+  const images = stockImagesForLine({
+    line, enrich: { ...enrich, images: [...(Array.isArray(enrich?.images) ? enrich.images : []), ...(pinned?.images || [])] },
+    product, amazon, expandedTitle, trusted: useCatalog,
+  });
   const expandedPkg = enrich?.package && typeof enrich.package === "object" ? enrich.package : {};
   const pkg = useCatalog ? packageFrom(product, amazon, pinned) : {
     length_in: numberOrNull(expandedPkg.length_in),
