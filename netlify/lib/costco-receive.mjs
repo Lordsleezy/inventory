@@ -11,6 +11,50 @@ function digits(value) {
   return String(value ?? "").replace(/\D/g, "");
 }
 
+export function hamming(left, right) {
+  if (!left || left.length !== right.length) return 99;
+  let distance = 0;
+  for (let i = 0; i < left.length; i++) if (left[i] !== right[i]) distance += 1;
+  return distance;
+}
+
+/** A unique same-length barcode within `max` digit changes. A tie stays unmatched. */
+export function nearestManifestLine(scanned, lines, max = 3) {
+  const code = digits(scanned);
+  if (code.length < 8) return null;
+  let best = [];
+  let distance = 99;
+  for (const line of lines || []) {
+    const upc = digits(line?.upc_normalized || line?.upc_raw);
+    if (!upc || upc === code || upc.length !== code.length) continue;
+    const next = hamming(upc, code);
+    if (next < distance) { distance = next; best = [line]; }
+    else if (next === distance) best.push(line);
+  }
+  if (best.length === 1 && distance >= 1 && distance <= max) return { line: best[0], distance };
+  return null;
+}
+
+function categoryIdOf(...values) {
+  for (const value of values) {
+    const id = clean(value);
+    if (/^\d+$/.test(id) && id !== "20713") return id;
+  }
+  return null;
+}
+
+function specificsFrom(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (/cost|price|ask|fee/i.test(key)) continue;
+    const text = clean(value);
+    if (!text || /^(unknown|n\/a|none|guess)$/i.test(text)) continue;
+    out[String(key).slice(0, 40)] = text.slice(0, 80);
+  }
+  return out;
+}
+
 function clean(value) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   return text || "";
@@ -138,16 +182,25 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
   const decision = classifyCostcoLine({ line, enrich, product, amazon });
   const pinned = enrich?.pinned && typeof enrich.pinned === "object" ? enrich.pinned : null;
   const useCatalog = decision.trusted;
-  const brand = clean(useCatalog ? (product?.brand || pinned?.brand || amazon?.brand || enrich?.brand || line?.brand) : (line?.brand || enrich?.brand));
+  const expandedTitle = clean(enrich?.expanded_title);
+  const expandedBrand = clean(enrich?.expanded_brand);
+  const brand = clean(useCatalog ? (product?.brand || pinned?.brand || amazon?.brand || enrich?.brand || line?.brand) : (line?.brand || expandedBrand || enrich?.brand));
   const title = clean(useCatalog
-    ? (decision.pinnedTitle || product?.title || pinned?.title || amazon?.title || enrich?.title || line?.description)
-    : (line?.description || ""));
-  const model = clean(useCatalog ? (product?.model || pinned?.model || amazon?.model || enrich?.model) : "");
-  const description = clean(useCatalog ? (product?.description || pinned?.description || amazon?.description || line?.description) : (line?.description || ""));
+    ? (decision.pinnedTitle || product?.title || pinned?.title || amazon?.title || enrich?.title || expandedTitle || line?.description)
+    : (expandedTitle || line?.description || ""));
+  const model = clean(useCatalog ? (product?.model || pinned?.model || amazon?.model || enrich?.model || enrich?.expanded_model) : (enrich?.expanded_model || ""));
+  const description = clean(useCatalog ? (product?.description || pinned?.description || amazon?.description || line?.description) : (enrich?.expanded_description || line?.description || ""));
   const features = useCatalog ? (product?.features || pinned?.features || amazon?.features || []).filter((row) => typeof row === "string").slice(0, 12) : [];
-  const images = useCatalog ? (pinned?.images || photosOf(product, amazon)) : [];
-  const pkg = useCatalog ? packageFrom(product, amazon, pinned) : { length_in: null, width_in: null, height_in: null, weight_lb: null };
-  const aspects = useCatalog ? itemAspects(product, amazon, pinned) : {};
+  const expandedImages = Array.isArray(enrich?.images) ? enrich.images.filter((url) => typeof url === "string" && /^https?:/i.test(url)).slice(0, 6) : [];
+  const images = useCatalog ? (pinned?.images || photosOf(product, amazon)) : expandedImages;
+  const expandedPkg = enrich?.package && typeof enrich.package === "object" ? enrich.package : {};
+  const pkg = useCatalog ? packageFrom(product, amazon, pinned) : {
+    length_in: numberOrNull(expandedPkg.length_in),
+    width_in: numberOrNull(expandedPkg.width_in),
+    height_in: numberOrNull(expandedPkg.height_in),
+    weight_lb: numberOrNull(expandedPkg.weight_lb),
+  };
+  const aspects = useCatalog ? itemAspects(product, amazon, pinned) : specificsFrom(enrich?.specifics);
   const pack = packCountOf(line?.description, enrich?.variant_note, product?.aspects);
   const retail = stripMoney ? null : (Number.isInteger(line?.unit_retail_cents) ? line.unit_retail_cents : null);
   const gtin = decision.internal ? null : (normalizeGtin(line?.upc_normalized || line?.upc_raw).gtin14 || null);
@@ -189,7 +242,7 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
       candidates,
       photo: decision.photo,
       internal: decision.internal,
-      ebay_category_id: clean(costco?.ebay_category_id) || null,
+      ebay_category_id: categoryIdOf(costco?.ebay_category_id, enrich?.ebay_category_id),
     },
   };
 }
@@ -328,6 +381,25 @@ export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false
       receive: { bucket: "manifest", photo: true, internal: true, candidates: [], conflict: null, item_number: "" },
     };
   }
+  if (!found.line && found.ids.length && code.length >= 8 && !isCostcoInternalCode(code)) {
+    const { data, error } = await sb.from("manifest_lines").select(LINE_COLS).in("manifest_id", found.ids).limit(500);
+    if (error) throw new Error(error.message);
+    const near = nearestManifestLine(code, data || []);
+    if (near) {
+      const ctx = await loadContext(sb, storeId, near.line);
+      const card = buildCostcoReceive({
+        line: near.line,
+        enrich: ctx.enrich,
+        product: ctx.product,
+        amazon: ctx.payload?.amazon || null,
+        costco: ctx.payload?.costco || null,
+        stripMoney,
+      });
+      card.receive.suggested = true;
+      card.receive.scanned_code = code;
+      return card;
+    }
+  }
   if (!found.line) return null;
   const ctx = await loadContext(sb, storeId, found.line);
   return buildCostcoReceive({
@@ -461,4 +533,24 @@ export async function acceptManifestIdentity(sb, storeId, raw) {
     amazon: null,
     stripMoney: false,
   });
+}
+
+/** Save a box barcode on the manifest line the clerk confirmed. The next box with that code is an exact hit. */
+export async function attachManifestAlternate(sb, storeId, { scanned, itemNumber }) {
+  const code = digits(scanned);
+  if (!/^\d{8,14}$/.test(code)) throw Object.assign(new Error("That is not a barcode"), { status: 400 });
+  const found = await findManifestLine(sb, storeId, itemNumber);
+  if (!found.line) throw Object.assign(new Error("That item is not on a manifest"), { status: 404 });
+  const located = await sb.from("manifest_lines").select("id, alternate_upcs, tcin")
+    .in("manifest_id", found.ids)
+    .eq("item_number", String(found.line.item_number || ""))
+    .limit(1);
+  const row = located.data?.[0];
+  if (located.error || !row?.id) throw Object.assign(new Error(located.error?.message || "manifest_line_not_found"), { status: 404 });
+  const next = [...new Set([...(row.alternate_upcs || []).map((item) => digits(item)).filter(Boolean), code])];
+  const saved = await sb.from("manifest_lines").update({ alternate_upcs: next }).eq("id", row.id);
+  if (saved.error) throw new Error(saved.error.message);
+  const ctx = await loadContext(sb, storeId, found.line);
+  await remember(sb, storeId, ctx.key, ctx.book, String(found.line.tcin || row.tcin || ""), { alternate_upcs: next });
+  return { ok: true, item_number: found.line.item_number, alternate: code };
 }

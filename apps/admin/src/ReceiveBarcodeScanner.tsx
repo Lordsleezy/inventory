@@ -54,6 +54,9 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
   const [torchOn, setTorchOn] = useState(false);
   const [torchOk, setTorchOk] = useState(false);
   const track = useRef<MediaStreamTrack | null>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  const stopCamera = useRef<((dismiss: boolean) => void) | null>(null);
 
   useEffect(() => {
     let stream: MediaStream | null = null;
@@ -62,11 +65,26 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
     let last = '';
     let hits = 0;
     let frame = 0;
-    const lifecycle = scannerLifecycle(document, window, video.current, () => {
+    const userClose = { current: false };
+    const halt = () => {
       stopped = true;
       window.cancelAnimationFrame(frame);
-      onClose();
+      stream?.getTracks().forEach(item => item.stop());
+      stream = null;
+      const el = video.current;
+      if (el) {
+        el.pause();
+        el.srcObject = null;
+      }
+    };
+    const lifecycle = scannerLifecycle(document, window, video.current, () => {
+      halt();
+      if (userClose.current) close.current();
     });
+    stopCamera.current = dismiss => {
+      userClose.current = dismiss;
+      lifecycle.stop();
+    };
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     void (async () => {
@@ -109,8 +127,8 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
             if (code === last) hits += 1;
             else { last = code; hits = 1; }
             if (hits >= 2 && !stopped) {
-              stopped = true;
               beep();
+              stopCamera.current?.(false);
               detect.current(code);
             }
           } catch { /* keep scanning */ }
@@ -124,7 +142,11 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
           : 'Camera unavailable. Type the digits under the barcode.');
       }
     })();
-    return () => { stopped = true; window.cancelAnimationFrame(frame); lifecycle.stop(); };
+    return () => {
+      userClose.current = false;
+      halt();
+      lifecycle.stop();
+    };
   }, []);
 
   async function toggleTorch() {
@@ -154,6 +176,7 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
     const code = acceptedBarcode(typed);
     if (!code) { setErr('That is not a valid UPC or EAN.'); return; }
     beep();
+    stopCamera.current?.(false);
     onDetect(code);
   }
 
@@ -165,7 +188,7 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
         {mode === 'photo' ? <span className="receive-scanner-caption">Take picture of item for identification</span> : <span className="receive-scanner-line" />}
       </div>
       <div className="receive-scanner-bar">
-        <button type="button" onClick={onClose}>Close</button>
+        <button type="button" onClick={() => stopCamera.current?.(true)}>Close</button>
         {torchOk && <button type="button" onClick={() => void toggleTorch()}>{torchOn ? 'Light off' : 'Light'}</button>}
         {mode === 'photo' && <button type="button" onClick={takePhoto}>OK</button>}
       </div>

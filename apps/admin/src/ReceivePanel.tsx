@@ -193,6 +193,8 @@ type Props = {
   /** Phone-only presentation for the Android Chrome-installed clerk app. */
   storePhoneMode?: boolean;
   initialManual?: boolean;
+  /** Phone Receive home: open the photo step instead of the barcode scanner. */
+  initialEntry?: 'scan' | 'identify';
   /** Prefill / enqueue a UPC from an earlier camera capture. */
   initialUpc?: string | null;
   onAppCancel?: () => void;
@@ -255,6 +257,8 @@ type Lookup = {
     manifest_id?: string | null;
     lot_id?: string | null;
     review?: boolean;
+    suggested?: boolean;
+    scanned_code?: string | null;
   };
 };
 
@@ -624,7 +628,7 @@ async function decodeFile(file: File): Promise<string | null> {
 
 /* ================================================================================================ */
 
-export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, storePhoneMode = false, initialManual, initialUpc, onAppCancel }: Props) {
+export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome, staffMode = false, storePhoneMode = false, initialManual, initialEntry = 'scan', initialUpc, onAppCancel }: Props) {
   const [options, setOptions] = useState<Options | null>(null);
   const [receiveLocations, setReceiveLocations] = useState<ReceiveLocation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState(() => {
@@ -1923,12 +1927,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
   }
 
-  /** Verify barcode identity against the actual unit photo. */
+  /** Verify barcode identity against the actual unit photo. A miss checks this lot before the open catalog. */
   async function identifyMissPhoto(raw: File | null, alreadyStaged = false) {
-    if (!current) return;
+    const active = current ?? (appChrome ? {
+      id: `photo-${Date.now()}`,
+      upc: '',
+      status: 'ready' as const,
+      result: { true_miss: true, merged: { not_found: true } } as Lookup,
+    } : null);
+    if (!active) return;
     const identifyRequest = ++photoIdentifyRequest.current;
     if (!raw) {
       setPhotoIdError('Camera returned no photo. Try again, or choose a photo from your phone.');
+      if (appChrome) throw new Error('no photo');
       return;
     }
     setPhotoIdBusy(true);
@@ -1943,6 +1954,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!file) {
       setPhotoIdError('Could not read that photo. Try one clear picture of the box or label.');
       setPhotoIdBusy(false);
+      if (appChrome) throw new Error('unreadable photo');
       return;
     }
     setError('');
@@ -1957,18 +1969,44 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       const upload = await identificationJpeg(file);
       const compressedMs = performance.now() - photoStarted;
       const image_base64 = await fileToBase64(upload);
+      if (appChrome) {
+        const lot = await postIdentifyPhoto(accessToken, {
+          action: 'identify_manifest',
+          upc: active.upc,
+          image_base64,
+          mime_type: upload.type || 'image/jpeg',
+        });
+        const card = lot.data?.card as Lookup | undefined;
+        if (lot.status >= 200 && lot.status < 300 && card?.merged?.title) {
+          setLoadedId(null);
+          setPhotoCandidate(null);
+          setQueue(q => {
+            const next = {
+              id: active.id,
+              upc: active.upc,
+              status: 'ready' as const,
+              result: { ...card, receive: { ...card.receive, suggested: true, scanned_code: active.upc || null } },
+            };
+            return q.some(row => row.id === active.id) ? q.map(row => row.id === active.id ? next : row) : [next];
+          });
+          return;
+        }
+      }
       const photoResponse = await postIdentifyPhoto(accessToken, {
           action: 'identify_only',
-          upc: current.upc,
-          miss_id: current.result?.miss_id || null,
+          persist: appChrome ? false : undefined,
+          upc: active.upc,
+          miss_id: active.result?.miss_id || null,
           image_base64,
           mime_type: upload.type || 'image/jpeg',
       });
       if (identifyRequest !== photoIdentifyRequest.current) return;
       const json = photoResponse.data;
       if (photoResponse.status < 200 || photoResponse.status >= 300) {
-        setPhotoIdError(json.message || json.error || 'Photo identify failed. Retry or fill fields by hand.');
-        setWarning(catalogMissMessage(current.result) || '');
+        const message = json.message || json.error || 'Photo identify failed. Retry or fill fields by hand.';
+        setPhotoIdError(message);
+        setWarning(catalogMissMessage(active.result) || '');
+        if (appChrome) throw new Error(message);
         return;
       }
       const brand = text(json.fill?.brand || json.identity?.brand);
@@ -1978,16 +2016,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (identity.title_complete === false || !isCompleteReceiveTitle(title, brand)) {
       setPhotoIdError('Photo identification returned only a partial title. Enter the item type and visible details before saving.');
       setWarning('A short AI title cannot be saved. Add the item type and key size, color, or pattern.');
+      if (appChrome) throw new Error('partial title');
         return;
       }
-      const barcode = current.result?.merged;
+      const barcode = active.result?.merged;
       const barcodeBrand = text(barcode?.brand);
       const barcodeTitle = text(barcode?.title);
-      const conflict = Boolean(!current.result?.store_label && barcodeBrand && brand
+      const conflict = Boolean(!active.result?.store_label && barcodeBrand && brand
         && barcodeBrand.toLocaleLowerCase() !== brand.toLocaleLowerCase());
       setPhotoConflictText(conflict
         ? `Photo shows ${title}, but the barcode says ${barcodeTitle || `${barcodeBrand} product`}. Which is it?`
-        : current.result?.store_label
+        : active.result?.store_label
           ? `Photo identifies ${title}. Confirm this is the right product for the store sticker.`
           : `Photo identifies ${title}. Confirm the product details before saving.`);
       setPhotoCandidate({ ...identity, brand, model, title,
@@ -2000,13 +2039,36 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setPhotoIdentity(identity);
       if (brand) void findPhotoPrices(identity);
       else { setPhotoPrice(null); setPhotoPriceBusy(false); setPhotoPriceError('No brand was visible; set the selling price from the item itself.'); }
-      photoCheckedFor.current = current.id;
-      setDialog('miss-photo');
+      photoCheckedFor.current = active.id;
+      if (appChrome) {
+        setLoadedId(null);
+        setQueue(q => {
+          const next = {
+            id: active.id,
+            upc: active.upc,
+            status: 'ready' as const,
+            result: {
+              ...(active.result || {}),
+              true_miss: false,
+              merged: { ...(active.result?.merged || {}), title, brand, not_found: false },
+            },
+          };
+          return q.some(row => row.id === active.id) ? q.map(row => row.id === active.id ? next : row) : [next];
+        });
+      } else setDialog('miss-photo');
       console.info('receive_photo_timing', { compressed_ms: Math.round(compressedMs), upload_ms: Math.round(photoResponse.uploadMs),
         photo_bytes: upload.size, photo_to_filled_ms: Math.round(performance.now() - photoStarted),
         identify_server_ms: json.timing?.identify_ms || null, request_ms: Math.round(photoResponse.requestMs) });
     } catch (e) {
-      setPhotoIdError(errText(e) || 'Photo identify failed. Retry or fill fields by hand.');
+      const message = errText(e) || 'Photo identify failed. Retry or fill fields by hand.';
+      setPhotoIdError(message);
+      reportClientError(accessToken, {
+        message: `receive photo: ${message}`,
+        stack: e instanceof Error ? e.stack : '',
+        page: 'inventory/receive',
+        action_name: 'identify_manifest',
+      });
+      if (appChrome) throw e instanceof Error ? e : new Error(message);
     } finally {
       if (identifyRequest === photoIdentifyRequest.current) {
         setPhotoIdBusy(false);
@@ -2131,7 +2193,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const invalid = (key: ReceiveFieldKey) => showSaveValidation && liveMissing.includes(
     key === 'ebay_category' ? 'category' : key === 'ebay_aspects' ? 'item specifics' : key === 'upc' ? 'UPC' : key,
   );
-  if (appChrome && !manual) {
+  if (appChrome) {
     const foundTitle = text(result?.merged?.title);
     const foundBrand = text(result?.merged?.brand);
     const lot = text(result?.receive?.lot_id);
@@ -2141,7 +2203,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         lookupId={current?.id || null} lookupStatus={current?.status || null}
         miss={isTrueCatalogMiss(result)} title={foundTitle} brand={foundBrand}
         details={[result?.receive?.item_number, text(result?.merged?.category)].filter(Boolean).join(' · ')}
-        source={result?.receive?.item_number ? `Found by UPC · manifest ${lot || 'TRA-7096264'}` : 'Found by UPC'}
+        source={result?.receive?.suggested ? `Possible match · manifest ${lot || 'TRA-7096264'}` : (result?.receive?.item_number ? `Found by UPC · manifest ${lot || 'TRA-7096264'}` : 'Found by UPC')}
+        entry={initialEntry === 'identify' ? 'identify' : 'scan'}
+        holdForLookup={Boolean(initialUpc) && initialEntry !== 'identify'}
         stockUrl={stockPhotoUrls[0]?.url || ''}
         retailCents={result?.receive?.manifest_retail_cents ?? null}
         manifestReference={manifestReference}
@@ -2163,7 +2227,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         onClear={() => { setQueue([]); setPhotoCandidate(null); setFiles([]); setError(''); }}
         onScan={code => { setError(''); enqueue(code); }}
         onReject={() => { setPhotoCandidate(null); setPhotoVerifyPending(false); }}
-        onAccept={async () => { if (photoCandidate) await choosePhotoIdentity(true); }}
+        onAccept={async () => {
+          const item = result?.receive?.item_number;
+          const scanned = current?.upc || '';
+          if (result?.receive?.suggested && item && /^\d{8,14}$/.test(scanned)) {
+            const saved = await fetch(floorFunctionUrl('upc-lookup'), {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+              body: JSON.stringify({ action: 'attach_alternate', upc: scanned, item_number: item }),
+            });
+            if (!saved.ok) setError('That barcode was not saved on the manifest line. You can still finish this item.');
+          }
+          if (photoCandidate) await choosePhotoIdentity(true);
+        }}
       />
     </section>;
   }

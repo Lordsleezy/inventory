@@ -29,6 +29,7 @@ export function ReceiveWizard({
   stockMatches, onAddToStock, addingToStock,
   ebayAspects, setEbayAspects, needsSpecifics,
   busy, error, onSave, onCancel, onClear, onScan, onReject, onAccept,
+  entry = 'scan', holdForLookup = false,
 }: {
   client: SupabaseClient;
   storeId: string;
@@ -68,8 +69,12 @@ export function ReceiveWizard({
   onScan: (code: string) => void;
   onReject: () => void;
   onAccept: () => void | Promise<void>;
+  entry?: 'scan' | 'identify';
+  holdForLookup?: boolean;
 }) {
-  const [step, setStep] = useState<ReceiveStepId | 'scan' | 'lookup' | 'identify'>('scan');
+  const [step, setStep] = useState<ReceiveStepId | 'scan' | 'lookup' | 'identify'>(
+    entry === 'identify' ? 'identify' : (holdForLookup ? 'lookup' : 'scan'),
+  );
   const [bay, setBay] = useState<number | null>(null);
   const [row, setRow] = useState<number | null>(null);
   const seen = useRef<string | null>(null);
@@ -85,12 +90,17 @@ export function ReceiveWizard({
   }), [doNotList, form, ebayAspects.categoryId, needsSpecifics, stockMatches.length]);
 
   useEffect(() => {
-    if (!lookupId) { seen.current = null; setStep('scan'); return; }
+    if (!lookupId) {
+      seen.current = null;
+      if (entry === 'identify') setStep('identify');
+      else if (!holdForLookup) setStep('scan');
+      return;
+    }
     if (lookupStatus === 'loading') { setStep('lookup'); return; }
     if (seen.current === lookupId) return;
     seen.current = lookupId;
     setStep(miss && !title ? 'identify' : 'confirm');
-  }, [lookupId, lookupStatus, miss, title]);
+  }, [lookupId, lookupStatus, miss, title, entry, holdForLookup]);
 
   function go(delta: number) {
     if (step === 'confirm' && delta < 0) { onClear(); return; }
@@ -117,7 +127,9 @@ export function ReceiveWizard({
   const reference = <ManifestReceiveReference result={manifestReference} />;
   if (step === 'scan') return <ReceiveBarcodeScanner onClose={onCancel} onDetect={onScan} />;
   if (step === 'identify') {
-    return <ReceiveBarcodeScanner mode="photo" banner={reference} onClose={onClear} onDetect={() => undefined} onPhoto={file => { void Promise.resolve(onIdentify(file)).then(() => setStep('confirm')); }} />;
+    return <ReceiveBarcodeScanner mode="photo" banner={<>{reference}{error && <p className="receive-scanner-error" role="alert">{error}</p>}</>} onClose={onCancel} onDetect={() => undefined} onPhoto={file => {
+      void Promise.resolve(onIdentify(file)).then(() => setStep('confirm')).catch(() => undefined);
+    }} />;
   }
 
   return (
