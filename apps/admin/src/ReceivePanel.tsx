@@ -1331,7 +1331,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!r?.store_label && !r?.receive?.internal && m?.images?.[0]) void stageStockPhoto(String(m.images[0]), current.upc, scanId);
     const missingBox = [initial.length, initial.width, initial.height, initial.weight].some(v => !v);
     const missingProduct = [initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v);
-    if (!r?.store_label && !isTrueCatalogMiss(r) && (missingBox || (!prewarmed && missingProduct)))
+    if (!r?.store_label && !isTrueCatalogMiss(r) && (appChrome ? missingProduct : missingBox || (!prewarmed && missingProduct)))
       void findPhotoDimensions(current.upc, scanId, {title:m?.title,brand:m?.brand,model:m?.model,size:initial.size});
     void findDups(upcVariants(current.upc, r)).then(d => { if (mounted.current && activeScan.current === scanId) setDups(d); });
     // Restore photos if the camera app killed the PWA mid-capture for this scan.
@@ -1407,7 +1407,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   type Parsed = { ask: number | null; cost: number | null; dims: (number | null)[] };
   function parse(): Parsed | null {
     if (doNotList) {
-      const dims = [form.length, form.width, form.height, form.weight].map(v => {
+      const dims = recordedSize().map(v => {
         const t = v.trim();
         if (!t) return null;
         const n = Number(t);
@@ -1419,7 +1419,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const cost = cents(form.cost);
     if (ask === undefined) { setError('Price must look like 24.99.'); return null; }
     if (cost === undefined) { setError('Cost must look like 9.00 (blank = unknown).'); return null; }
-    const dims = [form.length, form.width, form.height, form.weight].map(v => {
+    const dims = recordedSize().map(v => {
       const t = v.trim();
       if (!t) return null;
       const n = Number(t);
@@ -1440,8 +1440,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   function personPhotoReady() {
     return files.length > 0 || stagedPhotoPaths.length > 0;
   }
+  function recordedSize() {
+    return appChrome
+      ? [form.productDepth, form.productWidth, form.productHeight, form.productWeight]
+      : [form.length, form.width, form.height, form.weight];
+  }
   function dimensionsReady() {
-    return [form.length, form.width, form.height, form.weight].every(v => {
+    return recordedSize().every(v => {
       const n = Number(String(v).trim());
       return Number.isFinite(n) && n > 0;
     });

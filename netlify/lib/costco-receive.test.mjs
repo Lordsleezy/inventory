@@ -175,6 +175,27 @@ test("an untrusted catalog box fills when this barcode has no saved box", () => 
   assert.match(card.merged.title, /KOHLER TERZET/);
   assert.equal(card.merged.title.includes("Widespread"), false);
   assert.deepEqual(card.merged.package, { length_in: 22.68, width_in: 9.76, height_in: 3.7, weight_lb: 3.68 });
+  assert.equal(card.merged.aspects.product_height_in, undefined);
+});
+
+test("the item's own size is kept when the shipping box is unknown", () => {
+  const card = buildCostcoReceive({
+    line: { ...line, description: "LED FEIT 100W GLASS A21 5", brand: "Feit" },
+    enrich: { status: "partial", why: "Several Amazon results match: bulb one | bulb two" },
+    product: { title: "Some other bulb" },
+    amazon: {
+      found: true,
+      identifier_match: false,
+      title: "Feit Electric 100W Replacement Bulbs",
+      item: { length_in: 4.7, width_in: 2.4, height_in: 2.4, weight_lb: 0.4 },
+    },
+  });
+  assert.match(card.merged.title, /FEIT/);
+  assert.equal(card.merged.aspects.product_depth_in, "4.7");
+  assert.equal(card.merged.aspects.product_width_in, "2.4");
+  assert.equal(card.merged.aspects.product_height_in, "2.4");
+  assert.equal(card.merged.aspects.product_weight_lb, "0.4");
+  assert.equal(card.merged.package.length_in, null);
 });
 
 test("a listed package fills a side the catalog left blank", () => {
