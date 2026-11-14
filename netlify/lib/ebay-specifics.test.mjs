@@ -41,7 +41,7 @@ test("fillMissing never overwrites a set value and only accepts allowed values f
   assert.deepEqual(missingRequired(FIELDS, { Brand: "X", Type: "Iron" }), ["Type"]);
 });
 
-test("guessReceiveAspects fills Type from the category path and never leaves required list blanks", () => {
+test("guessReceiveAspects fills Type from the category path and leaves an unmatched list blank", () => {
   const typeField = {
     name: "Type",
     required: true,
@@ -65,7 +65,16 @@ test("guessReceiveAspects fills Type from the category path and never leaves req
     { title: "Widget", brand: "", model: "" },
     "Other > Stuff",
   );
-  assert.equal(noHint.attributes.Finish, "Matte", "last-resort guess so Receive is not stuck");
+  assert.equal(noHint.attributes.Finish, undefined);
+
+  const massager = guessReceiveAspects(
+    [{ name: "Type", required: true, allowed: [], selection_only: false }, { name: "Brand", required: true, allowed: ["Other"], selection_only: true }],
+    {},
+    { title: "Sharper Image Shiatsu Neck and Shoulder Massager", brand: "Sharper Image", model: "" },
+    "Health & Beauty > Massage > Massagers",
+  );
+  assert.equal(massager.attributes.Type, "Massager");
+  assert.equal(massager.attributes.Brand, "Sharper Image");
 });
 
 test("Catalog API results fill aspects without overwriting existing values", async () => {

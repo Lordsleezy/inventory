@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { ReceiveBarcodeScanner } from './ReceiveBarcodeScanner';
 import { ManifestReceiveReference, useManifestReceiveReference } from './ManifestReceiveReference';
-import { ReceiveCategoryAspects, type ReceiveAspectState } from './ReceiveCategoryAspects';
 import { locationMenuLabel, type LocationChoice } from './locationPlace';
 import { manifestDefectWarnings } from './manifestReference';
 import { adjacentReceiveStep, receiveStepPlan, type ReceiveStepId } from './receiveSteps';
@@ -23,20 +21,16 @@ type FormSlice = {
 type Stock = { sku: string; title: string; quantity: number; condition: string | null; is_stocked: boolean };
 
 export function ReceiveWizard({
-  client, storeId, accessToken, staffMode,
+  staffMode,
   lookupId, lookupStatus, miss, title, brand, details, source, stockUrl, onWrongPhoto, retailCents, manifestReference,
   form, update, doNotList, setDoNotList,
   hasPhoto, photoPreviews = [], onPhoto, onIdentify,
   locations, location, setLocation,
   stockMatches, onAddToStock, addingToStock,
-  ebayAspects, setEbayAspects, needsSpecifics,
   busy, error, onSave, onCancel, onClear, onScan, onReject, onAccept,
-  nextSku = '', upc = '', category = '', savedNotice = '',
+  nextSku = '', upc = '', savedNotice = '',
   entry = 'scan', holdForLookup = false,
 }: {
-  client: SupabaseClient;
-  storeId: string;
-  accessToken: string;
   staffMode: boolean;
   lookupId: string | null;
   lookupStatus: string | null;
@@ -63,9 +57,6 @@ export function ReceiveWizard({
   stockMatches: Stock[];
   onAddToStock: (sku: string) => void;
   addingToStock: boolean;
-  ebayAspects: ReceiveAspectState;
-  setEbayAspects: (next: ReceiveAspectState) => void;
-  needsSpecifics: boolean;
   busy: boolean;
   error: string;
   onSave: () => void;
@@ -78,7 +69,6 @@ export function ReceiveWizard({
   holdForLookup?: boolean;
   nextSku?: string;
   upc?: string;
-  category?: string;
   savedNotice?: string;
 }) {
   const [step, setStep] = useState<ReceiveStepId | 'scan' | 'lookup' | 'identify'>(
@@ -90,17 +80,13 @@ export function ReceiveWizard({
   const seen = useRef<string | null>(null);
   const returnToReview = useRef(false);
 
-  // categoryId alone is not enough — empty fields used to skip this step and fail at save.
-  const categoryReady = Boolean(ebayAspects.categoryId && ebayAspects.fields.length > 0);
   const plan = useMemo(() => receiveStepPlan({
     doNotList,
     brand: form.unbranded ? 'Unbranded' : form.brand,
     title: form.title,
-    hasCategory: categoryReady,
-    needsSpecifics: needsSpecifics || Boolean(ebayAspects.categoryId && !ebayAspects.fields.length),
     hasDims: [form.length, form.width, form.height, form.weight].every(value => Number(value) > 0),
     hasStockMatch: stockMatches.length > 0,
-  }), [doNotList, form, categoryReady, ebayAspects.categoryId, ebayAspects.fields.length, needsSpecifics, stockMatches.length]);
+  }), [doNotList, form, stockMatches.length]);
 
   useEffect(() => {
     document.body.classList.add('receive-steps-open');
@@ -134,7 +120,6 @@ export function ReceiveWizard({
     if (step === 'confirm' && delta < 0) { onClear(); return; }
     if (delta > 0 && step === 'brand' && !form.brand.trim()) return;
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
-    if (delta > 0 && step === 'category' && (!categoryReady || needsSpecifics)) return;
     if (delta > 0 && step === 'dims' && ![form.length, form.width, form.height, form.weight].every(value => Number(value) > 0)) return;
     const next = adjacentReceiveStep(plan, step as ReceiveStepId, delta > 0 ? 1 : -1);
     if (next) setStep(next);
@@ -246,21 +231,6 @@ export function ReceiveWizard({
           {nav}
         </div>
       )}
-      {step === 'category' && (
-        <div className="receive-step">
-          <h2>{ebayAspects.categoryId && needsSpecifics ? 'Item specifics' : 'Category'} <span className="receive-step-req">*</span></h2>
-          <ReceiveCategoryAspects
-            client={client} storeId={storeId} accessToken={accessToken} doNotList={doNotList}
-            channels={staffMode ? [] : ['ebay']} disabled={busy} showErrors
-            identity={{ brand: form.unbranded ? 'Unbranded' : form.brand, model: '', title: form.title, condition: form.condition, upc: upc || '' }}
-            value={ebayAspects} onChange={setEbayAspects}
-          />
-          <div className="receive-step-nav">
-            <button type="button" onClick={() => go(-1)}>Back</button>
-            <button type="button" disabled={!categoryReady || needsSpecifics} onClick={() => go(1)}>Next</button>
-          </div>
-        </div>
-      )}
       {step === 'condition' && (
         <div className="receive-step">
           <h2>Condition <span className="receive-step-req">*</span></h2>
@@ -362,7 +332,6 @@ export function ReceiveWizard({
             {([
               ['UPC', upc || '—', 'confirm'],
               ['Brand', form.unbranded ? 'Unbranded' : (form.brand || brand || '—'), 'brand'],
-              ['Category', doNotList ? '' : (category || '—'), 'category'],
               ['Condition', `${form.condition || '—'}${doNotList ? ' · Do not list' : ''}`, 'condition'],
               ['Price', doNotList ? '' : (form.ask ? `$${form.ask}` : '—'), 'price'],
               ['Quantity', doNotList ? '' : (form.quantity || '1'), 'price'],
@@ -376,11 +345,6 @@ export function ReceiveWizard({
               </button>
             ))}
           </div>
-          {!doNotList && (!categoryReady || needsSpecifics) && (
-            <p className="receive-ebay-soft" role="status">
-              eBay category or required specifics are still open. Save stocks this on Floor anyway and leaves it unfinished for eBay.
-            </p>
-          )}
           <div className="receive-step-nav">
             <button type="button" onClick={() => setStep('location')}>Back</button>
             <button type="button" disabled={busy || !hasPhoto || (!doNotList && !form.ask.trim())} onClick={onSave}>{busy ? 'Saving…' : 'Save & scan next'}</button>

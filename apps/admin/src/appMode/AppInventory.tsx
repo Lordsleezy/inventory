@@ -293,7 +293,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
     if (filter === 'needs_check') return `${pieces} units need to be checked${rowsNote}`;
     if (filter === 'no_location') return `${pieces} in-stock units need a location${rowsNote}`;
     if (filter === 'missing_cost') return `${missingCostCount ?? 0} units missing a cost`;
-    if (filter === 'ebay_fix') return `${ebayFix?.count ?? 0} need an eBay fix`;
+    if (filter === 'ebay_fix') return `${ebayFix?.count ?? 0} need eBay fixes`;
     if (filter === 'sold') return `${pieces} units sold${rowsNote}`;
     if (filter === 'dns') return `${pieces} units DNS / Do not ship${rowsNote}`;
     if (filter === 'defective') return `${pieces} units defective / not for sale${rowsNote}`;
@@ -346,7 +346,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
         {((staffMode ? [
           ['in_stock', 'In stock', null],
           ['sold', 'Sold', null],
-          ['ebay_fix', 'Needs eBay fix', ebayFix?.count],
+          ['ebay_fix', 'Needs eBay fixes', ebayFix?.count],
         ] : [
           ['in_stock', 'In stock', null],
           ['listed', 'Listed', cardTotals?.listed],
@@ -357,7 +357,7 @@ export function AppInventory({ client, storeId, fullAccess, staffMode = false, m
           ['dns', 'DNS', cardTotals?.dns],
           ['defective', 'Defective', cardTotals?.defective],
           ['never_list', 'Never list', cardTotals?.never_list],
-          ['ebay_fix', 'Needs eBay fix', ebayFix?.count],
+          ['ebay_fix', 'Needs eBay fixes', ebayFix?.count],
           ...(fullAccess ? [['missing_cost', 'Missing cost', missingCostCount] as const] : []),
         ]) as [Filter, string, number | null | undefined][]).map(([id, label, count]) => (
           <button
