@@ -143,7 +143,8 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
 
     const canvas = document.createElement('canvas');
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    let readBarcodes: ((data: ImageData, opts: object) => Promise<{ text?: string; isValid?: boolean }[]>) | null = null;
+    type ReadBarcodes = typeof import('zxing-wasm/reader').readBarcodes;
+    let readBarcodes: ReadBarcodes | null = null;
     const scan = async () => {
       const el = video.current;
       if (stopped || lifecycle.stopped || photoMode.current || !el) return;
@@ -182,7 +183,7 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
         setErr('');
         const zxing = await import('zxing-wasm/reader');
         await zxing.prepareZXingModule({ fireImmediately: true });
-        readBarcodes = zxing.readBarcodes as typeof readBarcodes;
+        readBarcodes = zxing.readBarcodes;
         if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser has no camera.');
         stream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
