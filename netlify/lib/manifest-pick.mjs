@@ -2,8 +2,15 @@ import { requireEnv } from "./server.mjs";
 
 const model = () => process.env.GEMINI_RECEIVE_MODEL || "gemini-3.5-flash-lite";
 
+export function identityCanPick({ brand, title }) {
+  const name = String(brand || "").replace(/\s+/g, " ").trim();
+  const product = String(title || "").replace(/\s+/g, " ").trim();
+  return name.length >= 2 || product.length >= 8;
+}
+
 /** Ask Gemini to choose one item number from this lot. An unknown product comes back blank. */
 export async function pickManifestItem({ brand, title, model: productModel, upc, lines }) {
+  if (!identityCanPick({ brand, title })) return "";
   const rows = (lines || []).slice(0, 450).map((line) => {
     const item = String(line.item_number || line.tcin || "").replace(/[|\n]/g, "");
     if (!item) return "";
