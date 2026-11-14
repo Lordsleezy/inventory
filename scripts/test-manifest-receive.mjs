@@ -33,6 +33,15 @@ const { outputFiles } = await build({
         if (name === 'receive_group_lookup') return { data: scenario.groups || [] };
         if (name === 'portal_receive_stock_match') return { data: scenario.stockMatches || [], error: null };
         if (name === 'portal_receive_options' || name === 'staff_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
+        if (name === 'portal_ebay_category_form') {
+          return { data: {
+            path: 'Home > Lamps',
+            fields: [
+              { name: 'Brand', required: true },
+              { name: 'Type', required: true, selection_only: true, allowed: ['Table Lamp'] },
+            ],
+          }, error: null };
+        }
         return { data: null };
       },
       from: table => {
@@ -42,12 +51,31 @@ const { outputFiles } = await build({
       },
     };
     window.fetch = async (url, options) => {
-      window.__calls.push({ url, body: JSON.parse(options?.body || '{}') });
+      const body = JSON.parse(options?.body || '{}');
+      window.__calls.push({ url, body });
       if (String(url).includes('upc-lookup')) return new Response(JSON.stringify(scenario.storeLabel
         ? { store_label: true, true_miss: true, amazon: { found: false }, upcitemdb: { found: false }, merged: { not_found: true } }
         : scenario.miss
         ? { true_miss: true, amazon: { found: false }, upcitemdb: { found: false }, merged: { not_found: true } }
         : { amazon: { found: true }, merged: { title: 'Catalog Brand Model Lamp', brand: 'Catalog Brand', model: 'Catalog Model', category: 'Home' }, receive: scenario.staff ? { ebay_category_id: '12345' } : undefined }), { status: 200 });
+      if (String(url).includes('ebay-specifics')) {
+        const fields = [
+          { name: 'Brand', required: true },
+          { name: 'Type', required: true, selection_only: true, allowed: ['Table Lamp'] },
+        ];
+        const attributes = { Brand: body.identity?.brand || 'Catalog Brand', Type: 'Table Lamp' };
+        if (body.action === 'suggest-for-title') {
+          return new Response(JSON.stringify({
+            ok: true,
+            suggestions: [{ category_id: '12345', path: 'Home > Lamps', category_name: 'Lamps', best_match: true }],
+            preselect: { category_id: '12345', path: 'Home > Lamps' },
+          }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          ok: true, path: 'Home > Lamps', fields, attributes, prefilled: ['Brand', 'Type'],
+          conditions: [{ grade: 'New', conditionId: '1000', ebayName: 'New' }],
+        }), { status: 200 });
+      }
       return new Response(JSON.stringify({ ok: true, price: { count: 0 }, fields: [], aspects: [] }), { status: 200 });
     };
     const initialUpc = Object.prototype.hasOwnProperty.call(scenario, 'initialUpc') ? scenario.initialUpc : '096801681609';
@@ -103,7 +131,22 @@ async function reachPrice(page) {
   assert.ok(nav && nav.y > 640, 'Back and Next sit at the bottom');
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'item.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(4096, 1) });
   await page.getByRole('button', { name: 'Next' }).click();
-  await page.getByRole('radio', { name: 'New' }).check();
+  // Category/specifics may appear until eBay fields hydrate; skip when already ready.
+  const categoryHeading = page.getByRole('heading', { name: /^(Category|Item specifics)/ });
+  const condition = page.getByRole('radio', { name: 'New' });
+  await Promise.race([
+    categoryHeading.waitFor({ state: 'visible' }),
+    condition.waitFor({ state: 'visible' }),
+  ]);
+  if (await categoryHeading.isVisible().catch(() => false)) {
+    const next = page.getByRole('button', { name: 'Next' });
+    if (await next.isDisabled()) {
+      const pick = page.locator('.rcv-cat').first();
+      if (await pick.count()) await pick.click();
+    }
+    await next.click({ timeout: 30000 });
+  }
+  await condition.check();
   await pinned(page);
   await page.getByRole('button', { name: 'Next' }).click();
   await page.locator('input[placeholder="0.00"]').waitFor();

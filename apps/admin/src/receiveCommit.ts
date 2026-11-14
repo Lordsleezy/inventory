@@ -24,7 +24,10 @@ export async function commitReceive(client: SupabaseClient, store: string, reque
   const snapshotMs = performance.now() - snapshotStarted;
   const rpcStarted = performance.now();
   const { data, error } = await client.rpc('portal_receive_stocked_commit', request);
-  if (error) throw new Error(`${error.message}. Save is not confirmed; use Recover interrupted save or retry this item.`);
+  if (error) {
+    // Keep the same request id + photos in localStorage so retry cannot create a second SKU.
+    throw new Error(`${error.message}. Floor save did not finish — tap Recover interrupted save or retry. The same request will not create a duplicate.`);
+  }
   localStorage.removeItem(key);
   return { ...data, client_rpc_ms: Math.round(performance.now() - rpcStarted), snapshot_ms: Math.round(snapshotMs) } as {
     skus: string[]; server_ms: number; server_steps?: Record<string, number>; replayed?: boolean; stocked?: boolean; quantity?: number; client_rpc_ms: number; snapshot_ms: number;

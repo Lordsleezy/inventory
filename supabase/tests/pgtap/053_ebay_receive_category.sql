@@ -33,40 +33,35 @@ end $$;
 
 select ok(
   position('receive_require_ebay_leaf' in pg_get_functiondef('public.portal_receive_stocked_commit(uuid,jsonb,text[],jsonb)'::regprocedure)) > 0,
-  'receive commit checks the eBay leaf');
+  'receive commit still calls the soft eBay leaf helper');
 
 select lives_ok(
   $$select public.receive_require_ebay_leaf('{"do_not_list":"true"}'::jsonb)$$,
   'do not list skips the eBay gate');
 
-select throws_ok(
+select lives_ok(
   $$select public.receive_require_ebay_leaf('{}'::jsonb)$$,
-  '22023', 'Pick an eBay category before saving.',
-  'an empty category is rejected');
+  'missing eBay category no longer blocks a Floor save');
 
-select throws_ok(
+select lives_ok(
   $$select public.receive_require_ebay_leaf('{"ebay_category_id":"100"}'::jsonb)$$,
-  '22023', 'That eBay category is not a leaf. Pick a specific category.',
-  'a parent category is rejected');
+  'a parent category no longer blocks a Floor save');
 
-select throws_ok(
+select lives_ok(
   $$select public.receive_require_ebay_leaf('{"ebay_category_id":"444","ebay_attributes":{},"ebay_condition_id":"1000"}'::jsonb)$$,
-  '22023', 'eBay still needs: Flavor',
-  'a missing required aspect is rejected');
+  'missing required aspects no longer block a Floor save');
 
-select throws_ok(
+select lives_ok(
   $$select public.receive_require_ebay_leaf('{"ebay_category_id":"444","ebay_attributes":{"Flavor":"Beef"},"ebay_condition_id":"1000"}'::jsonb)$$,
-  '22023', 'eBay still needs: Flavor',
-  'a value eBay does not allow is rejected');
+  'disallowed aspect values no longer block a Floor save');
 
-select throws_ok(
+select lives_ok(
   $$select public.receive_require_ebay_leaf('{"ebay_category_id":"444","ebay_attributes":{"Flavor":"Chicken"},"ebay_condition_id":"3000"}'::jsonb)$$,
-  '22023', 'That condition is not allowed for this eBay category.',
-  'a condition eBay does not allow is rejected');
+  'disallowed conditions no longer block a Floor save');
 
 select lives_ok(
   $$select public.receive_require_ebay_leaf('{"ebay_category_id":"444","ebay_attributes":{"Flavor":"Chicken"},"ebay_condition_id":"1000"}'::jsonb)$$,
-  'a leaf with its required aspect and an allowed condition passes');
+  'a complete eBay leaf still passes the soft gate');
 
 select set_config('request.jwt.claim.sub', gen_random_uuid()::text, true);
 select set_config('request.jwt.claim.role', 'authenticated', true);

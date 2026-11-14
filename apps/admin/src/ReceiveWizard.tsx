@@ -90,15 +90,22 @@ export function ReceiveWizard({
   const seen = useRef<string | null>(null);
   const returnToReview = useRef(false);
 
+  // categoryId alone is not enough — empty fields used to skip this step and fail at save.
+  const categoryReady = Boolean(ebayAspects.categoryId && ebayAspects.fields.length > 0);
   const plan = useMemo(() => receiveStepPlan({
     doNotList,
     brand: form.unbranded ? 'Unbranded' : form.brand,
     title: form.title,
-    hasCategory: Boolean(ebayAspects.categoryId),
-    needsSpecifics,
+    hasCategory: categoryReady,
+    needsSpecifics: needsSpecifics || Boolean(ebayAspects.categoryId && !ebayAspects.fields.length),
     hasDims: [form.length, form.width, form.height, form.weight].every(value => Number(value) > 0),
     hasStockMatch: stockMatches.length > 0,
-  }), [doNotList, form, ebayAspects.categoryId, needsSpecifics, stockMatches.length]);
+  }), [doNotList, form, categoryReady, ebayAspects.categoryId, ebayAspects.fields.length, needsSpecifics, stockMatches.length]);
+
+  useEffect(() => {
+    document.body.classList.add('receive-steps-open');
+    return () => { document.body.classList.remove('receive-steps-open'); };
+  }, []);
 
   useEffect(() => {
     if (!lookupId) {
@@ -127,7 +134,7 @@ export function ReceiveWizard({
     if (step === 'confirm' && delta < 0) { onClear(); return; }
     if (delta > 0 && step === 'brand' && !form.brand.trim()) return;
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
-    if (delta > 0 && step === 'category' && !ebayAspects.categoryId) return;
+    if (delta > 0 && step === 'category' && (!categoryReady || needsSpecifics)) return;
     if (delta > 0 && step === 'dims' && ![form.length, form.width, form.height, form.weight].every(value => Number(value) > 0)) return;
     const next = adjacentReceiveStep(plan, step as ReceiveStepId, delta > 0 ? 1 : -1);
     if (next) setStep(next);
@@ -245,10 +252,13 @@ export function ReceiveWizard({
           <ReceiveCategoryAspects
             client={client} storeId={storeId} accessToken={accessToken} doNotList={doNotList}
             channels={staffMode ? [] : ['ebay']} disabled={busy} showErrors
-            identity={{ brand: form.brand, model: '', title: form.title, condition: form.condition, upc: '' }}
+            identity={{ brand: form.unbranded ? 'Unbranded' : form.brand, model: '', title: form.title, condition: form.condition, upc: upc || '' }}
             value={ebayAspects} onChange={setEbayAspects}
           />
-          {nav}
+          <div className="receive-step-nav">
+            <button type="button" onClick={() => go(-1)}>Back</button>
+            <button type="button" disabled={!categoryReady || needsSpecifics} onClick={() => go(1)}>Next</button>
+          </div>
         </div>
       )}
       {step === 'condition' && (
@@ -366,6 +376,11 @@ export function ReceiveWizard({
               </button>
             ))}
           </div>
+          {!doNotList && (!categoryReady || needsSpecifics) && (
+            <p className="receive-ebay-soft" role="status">
+              eBay category or required specifics are still open. Save stocks this on Floor anyway and leaves it unfinished for eBay.
+            </p>
+          )}
           <div className="receive-step-nav">
             <button type="button" onClick={() => setStep('location')}>Back</button>
             <button type="button" disabled={busy || !hasPhoto || (!doNotList && !form.ask.trim())} onClick={onSave}>{busy ? 'Saving…' : 'Save & scan next'}</button>

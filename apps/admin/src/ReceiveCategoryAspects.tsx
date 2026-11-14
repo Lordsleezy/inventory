@@ -4,6 +4,7 @@ import { floorFunctionUrl } from './floorApi';
 import { AspectPicker } from './AspectPicker';
 import type { AspectDef } from './aspectOptions';
 import { missingEbayAspects } from './receive-validation';
+import { withFloorBrandOnEbay } from './ebayBrandMap';
 
 type Choice = { category_id: string; path: string; category_name?: string; best_match?: boolean };
 
@@ -154,6 +155,14 @@ export function ReceiveCategoryAspects({
     onChannelValues?.(channelValues, missing);
   }, [channelValues, channelFields, onChannelValues]);
 
+  useEffect(() => {
+    const next = withFloorBrandOnEbay(value.attributes, value.fields, identity.brand);
+    if (next === value.attributes) return;
+    onChange({ ...value, attributes: next });
+    // Only re-seed when Floor brand or the aspect field list changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity.brand, value.fields]);
+
   const required = useMemo(() => value.fields.filter(f => f.required), [value.fields]);
   const recommended = useMemo(() => value.fields.filter(f => !f.required && f.recommended), [value.fields]);
   const filledRequired = required.filter(f => aspectFilled(f, value.attributes, value.na)).length;
@@ -179,7 +188,11 @@ export function ReceiveCategoryAspects({
       const body = await res.json();
       if (!res.ok || body.ok === false) throw new Error(body.error || 'eBay is unreachable. Retry, or browse the saved category tree. Nothing was saved.');
       const fields = ((body.fields || row?.fields || []) as AspectDef[]);
-      const attrs = (body.attributes || {}) as Record<string, string>;
+      const attrs = withFloorBrandOnEbay(
+        (body.attributes || {}) as Record<string, string>,
+        fields,
+        identity.brand,
+      );
       const keptNames = new Set(fields.map(f => f.name));
       const dropped = Object.keys(value.attributes).filter(k => !keptNames.has(k));
       if (dropped.length) setClearedNote(`Category changed — dropped ${dropped.join(', ')}.`);

@@ -615,7 +615,10 @@ html.dark .receive-need{background:#2a2418;outline-color:#c9852a}
 .receive-scanner{position:fixed;inset:0;z-index:10050;background:#000;color:#fff;overflow:hidden}
 body.receive-scanner-open .receive-keyboard-trigger,
 body.receive-scanner-open .receive-typing-pad,
-body.receive-scanner-open .app-scanner-status{display:none!important}
+body.receive-scanner-open .app-scanner-status,
+body.receive-steps-open .receive-keyboard-trigger,
+body.receive-steps-open .receive-typing-pad,
+body.receive-steps-open .app-scanner-status{display:none!important}
 /* iOS Safari: fullscreen <video> can sit above later siblings and eat taps — keep it decorative. */
 .receive-scanner video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;pointer-events:none;z-index:0}
 .receive-scanner-shade{position:absolute;inset:0;z-index:1;background:linear-gradient(#000,transparent 18%,transparent 62%,#000);pointer-events:none}
@@ -626,7 +629,7 @@ body.receive-scanner-open .app-scanner-status{display:none!important}
 .receive-scanner-start{position:absolute;left:50%;top:42%;z-index:6;transform:translate(-50%,-50%);min-height:52px;padding:14px 22px;background:#fff;color:#000;border:0;border-radius:0;font:inherit;font-weight:700;touch-action:manipulation}
 .receive-scanner-status{position:absolute;left:16px;right:16px;top:calc(72px + env(safe-area-inset-top, 0px));z-index:4;color:#fff;font-weight:600;pointer-events:none;text-align:center}
 .receive-steps-host.panel{padding:0;margin:0;max-width:none;border:0;background:transparent}
-.receive-steps{position:fixed;z-index:30;top:0;right:0;left:0;bottom:calc(49px + env(safe-area-inset-bottom, 0px));background:#000;color:#fff;display:flex;flex-direction:column;padding:0;min-height:0}
+.receive-steps{position:fixed;z-index:40;top:0;right:0;left:0;bottom:calc(49px + env(safe-area-inset-bottom, 0px));background:#000;color:#fff;display:flex;flex-direction:column;padding:0;min-height:0}
 .receive-steps p,.receive-steps label,.receive-steps h2{color:#fff}
 .receive-step-top{flex:none;display:flex;justify-content:space-between;align-items:center;min-height:48px;padding:calc(8px + env(safe-area-inset-top, 0px)) 16px 8px;background:#000}
 .receive-step-top button,.receive-steps button,.receive-steps input:not([type=file]):not([type=radio]):not([type=checkbox]){background:#000;color:#fff;border:1px solid #fff;border-radius:0;padding:10px 12px;font:inherit}
@@ -637,9 +640,10 @@ body.receive-scanner-open .app-scanner-status{display:none!important}
 .receive-step h2{font-size:22px;margin:0}
 .receive-step-req{color:#e10600}
 .receive-step-error{color:#e10600;font-weight:700;padding:0 16px}
-.receive-step-nav{flex:none;display:flex;gap:16px;margin:auto -16px 0;padding:12px 16px;background:#000;position:sticky;bottom:0}
+.receive-step-nav{flex:none;display:flex;gap:16px;margin:auto -16px 0;padding:12px 16px;background:#000;position:sticky;bottom:0;z-index:50}
 .receive-step-nav button{flex:1;min-height:48px}
 .receive-step-nav.is-stack{flex-direction:column}
+.receive-ebay-soft{color:#9a9a9a;font-size:13px;padding:0 16px 8px;margin:0}
 .receive-steps .receive-step-label{margin:12px 0 0;color:#9a9a9a;font-size:13px}
 .receive-step-picks{display:flex;flex-wrap:wrap;gap:8px}
 .receive-steps .receive-step-picks button{flex:0 0 auto;min-height:36px;padding:6px 10px;background:#000;color:#9a9a9a;border:1px solid #4a4a4a;font-weight:500}
