@@ -4,6 +4,7 @@
  */
 import { isCostcoInternalCode } from "./gtin.mjs";
 import { barcodeLookupKeys, normalizeGtin } from "./gtin-normalize.mjs";
+import { keepStockPhoto } from "./stock-photo.mjs";
 
 const LOT_KEY = "manifest_line_enrichment_TRA-7096264";
 const COLORS = ["brushed nickel", "polished gold", "obsidian", "stainless", "black", "white", "silver", "gold", "blue", "green", "red", "navy", "gray", "grey", "pink", "brown"];
@@ -473,15 +474,56 @@ async function linesForStore(sb, ids) {
   return rows;
 }
 
+function ownedCatalogImages(product) {
+  return httpsImages(product?.images).filter((url) => keepStockPhoto(url)).slice(0, 6);
+}
+
+function cardWithImages(card, images) {
+  return {
+    ...card,
+    stock_photos: images.map((url) => ({ url, source: "catalog" })),
+    merged: { ...card.merged, images },
+  };
+}
+
+async function persistShownPhotos(sb, ctx, images) {
+  const urls = [...new Set((images || []).filter((url) => keepStockPhoto(url)))].slice(0, 6);
+  if (!urls.length || !ctx?.gtin?.ok || isCostcoInternalCode(ctx.gtin.gtin14)) return;
+  if (ctx.product) {
+    const saved = [...new Set([...urls, ...(ctx.product.images || [])])].slice(0, 8);
+    await sb.from("floor_products").update({
+      images: saved,
+      updated_at: new Date().toISOString(),
+    }).eq("gtin14", ctx.gtin.gtin14);
+  }
+  if (ctx.payload) {
+    await sb.from("upc_lookup_cache").update({
+      payload: {
+        ...ctx.payload,
+        stock_photos: urls.map((url) => ({ url, source: "catalog" })),
+        merged: { ...(ctx.payload.merged || {}), images: urls },
+      },
+    }).eq("gtin14", ctx.gtin.gtin14);
+  }
+}
+
 async function withCatalogStock(sb, storeId, ctx, line, card) {
-  if (card?.merged?.images?.length || card?.receive?.internal || card?.receive?.bucket === "search" || ctx?.enrich?.stock_photo_checked) {
-    return card;
+  let shown = card;
+  const owned = ownedCatalogImages(ctx?.product);
+  const sameItem = clean(ctx?.product?.title) && clean(ctx.product.title) === clean(card?.merged?.title);
+  if (!shown?.merged?.images?.length && sameItem && owned.length) shown = cardWithImages(shown, owned);
+  if (shown?.merged?.images?.length) {
+    await persistShownPhotos(sb, ctx, shown.merged.images).catch(() => undefined);
+    return shown;
+  }
+  if (shown?.receive?.internal || shown?.receive?.bucket === "search" || ctx?.enrich?.stock_photo_checked) {
+    return shown;
   }
   const { catalogStockPhotos, stockPhotoSearchTimed } = await import("./receive-stock-photos.mjs");
   const foundPhotos = await stockPhotoSearchTimed(catalogStockPhotos(storeId, {
     brand: card?.merged?.brand || line?.brand,
     title: card?.merged?.title || line?.description,
-  })).catch(() => ({ images: [], timedOut: true }));
+  }), 20000).catch(() => ({ images: [], timedOut: true }));
   const images = foundPhotos.images || [];
   const item = String(line?.tcin || line?.item_number || "");
   if (!images.length) {

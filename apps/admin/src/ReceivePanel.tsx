@@ -1551,8 +1551,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const quantity = Number(form.quantity);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
     let acceptedStockPhotoPath = titleOnlyReceive ? '' : stockPhotoPath;
+    let acceptedStockPhotoUrl = titleOnlyReceive ? '' : stockPhotoSourceUrl;
     const stockUrl = String(current?.result?.stock_photos?.find(photo => photo?.url)?.url || merged?.images?.[0] || '');
     if (!titleOnlyReceive && !acceptedStockPhotoPath && !manual && stockUrl && current?.upc) {
+      acceptedStockPhotoUrl = stockUrl;
       acceptedStockPhotoPath = await stageStockPhoto(stockUrl, current.upc, current.id) || '';
     }
     if (!titleOnlyReceive && photoBusy && files.length) { setError('Wait for the unit photo to finish uploading.'); return; }
@@ -1576,10 +1578,10 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     }
     if (!titleOnlyReceive && !dupAck && !ackDup && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
     if (titleOnlyReceive) setWarning('Saving without listing — hidden from the website and marketplaces.');
-    await receive(parsed, null, acceptedStockPhotoPath);
+    await receive(parsed, null, acceptedStockPhotoPath, acceptedStockPhotoUrl);
   }
 
-  async function receive(parsed: Parsed, hold: { reason: string; note: string } | null, acceptedStockPhotoPath = stockPhotoPath) {
+  async function receive(parsed: Parsed, hold: { reason: string; note: string } | null, acceptedStockPhotoPath = stockPhotoPath, acceptedStockPhotoUrl = stockPhotoSourceUrl) {
     setDialog(null);
     setBusy(true);
     setError('');
@@ -1660,9 +1662,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           setWarning(`Item saved, but the eBay category did not stick: ${errText(categoryError)}`);
         }
       }
-      if (acceptedStockPhotoPath && stockPhotoSourceUrl) {
+      if (acceptedStockPhotoPath && acceptedStockPhotoUrl) {
         void attachStockPhotoSources(skus, String(form.upc || current?.upc || ''), acceptedStockPhotoPath,
-          stockPhotoSourceUrl, stockPhotoUrls.filter(photo => photo.url !== stockPhotoSourceUrl).slice(0, 5));
+          acceptedStockPhotoUrl, stockPhotoUrls.filter(photo => photo.url !== acceptedStockPhotoUrl).slice(0, 5));
       }
       console.info('receive_save_timing', { commit_roundtrip_ms: Math.round(performance.now()-receiveStarted),
         validation_ms: Math.round(receiveStarted-saveTappedAt.current), rpc_ms:data.client_rpc_ms, recovery_snapshot_ms:data.snapshot_ms,
