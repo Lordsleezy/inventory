@@ -16,6 +16,8 @@ test('phone receive sections toggle, and category preview does not need a SKU', 
   assert.match(section, /is-collapsed/);
   assert.match(section, /inert/);
   assert.match(receive, /className="rcv-dnl"/);
+  assert.match(receive, /const titleOnlyReceive = doNotList \|\| isDefectiveCondition\(form\.condition\)/);
+  assert.match(receive, /\{titleOnlyReceive && <div className="rcv-dnl">/);
   assert.match(receive, /id="location"/);
   assert.doesNotMatch(receive, /Checking the barcode against your actual-unit photo/);
   assert.match(receive, /AI photo identify is only for UPC\/catalog misses/);

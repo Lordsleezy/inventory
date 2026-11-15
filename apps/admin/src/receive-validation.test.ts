@@ -14,14 +14,14 @@ test('do not list waives the photo and the dimensions', () => {
   }), []);
 });
 
-test('defective alone waives the photo and the dimensions', () => {
+test('defective alone only needs a title', () => {
   assert.equal(receiveMediaWaived(false, true), true);
   assert.deepEqual(receiveMissingFields({
-    doNotList: false, defective: true, brandReady: true, otherGaps: ['price'], hasPhoto: false, hasDimensions: false, hasLocation: true,
-  }), ['price']);
+    doNotList: false, defective: true, brandReady: true, otherGaps: ['price'], hasPhoto: false, hasDimensions: false, hasLocation: false, titleReady: false,
+  }), ['title']);
   assert.deepEqual(receiveMissingFields({
-    doNotList: false, defective: true, brandReady: true, otherGaps: [], hasPhoto: false, hasDimensions: false, hasLocation: false,
-  }), ['location']);
+    doNotList: false, defective: true, brandReady: false, otherGaps: ['price', 'brand'], hasPhoto: false, hasDimensions: false, hasLocation: false, titleReady: true,
+  }), []);
 });
 
 test('a normal receive requires a person photo, dimensions, and location', () => {

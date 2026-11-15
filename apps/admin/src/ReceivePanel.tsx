@@ -1407,7 +1407,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   /* ----- validation / completeness ----- */
   type Parsed = { ask: number | null; cost: number | null; dims: (number | null)[] };
   function parse(): Parsed | null {
-    if (doNotList) {
+    if (doNotList || isDefectiveCondition(form.condition)) {
       const dims = recordedSize().map(v => {
         const t = v.trim();
         if (!t) return null;
@@ -1452,7 +1452,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       return Number.isFinite(n) && n > 0;
     });
   }
-  const mediaWaived = doNotList || isDefectiveCondition(form.condition);
+  const titleOnlyReceive = doNotList || isDefectiveCondition(form.condition);
+  const mediaWaived = titleOnlyReceive;
   function listingGaps(p: Parsed | null): ReceiveFieldKey[] {
     if (doNotList || doNotShip) return [];
     const out: ReceiveFieldKey[] = [];
@@ -1469,16 +1470,16 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const quantityOk = Number(form.quantity) >= 1;
     const hasDimensions = dimensionsReady();
     const hasLocation = appChrome || Boolean(selectedLocation.trim());
-    if (doNotList) {
+    if (titleOnlyReceive) {
       return receiveMissingFields({
-        doNotList: true,
+        doNotList,
         brandReady: brandReady(),
         hasPhoto: photo,
         quantityOk,
-        defective: mediaWaived,
+        defective: true,
         hasDimensions,
         hasLocation: true,
-        titleOnly: staffMode,
+        titleOnly: true,
         titleReady: form.title.trim().length > 0,
       });
     }
@@ -1486,7 +1487,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return receiveMissingFields({ doNotList: false, brandReady: brandReady(), otherGaps: gaps, hasPhoto: photo, quantityOk, defective: mediaWaived, hasDimensions, hasLocation });
   }
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
-  const formValid = liveMissing.length === 0 && (doNotList || channelMissing === 0);
+  const formValid = liveMissing.length === 0 && (titleOnlyReceive || channelMissing === 0);
 
   /* ----- finish ----- */
   async function finish(event?: React.FormEvent, ackDup = false) {
@@ -1497,23 +1498,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!manual && current?.result?.receive?.bucket === 'search') { setError('Tap the manifest line that matches the box.'); return; }
     const brandError = notForSaleBrandError(doNotList, brandReady());
     if (brandError) { setError(brandError); return; }
-    if (!doNotList && photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
-    if (!doNotList && photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
+    if (!titleOnlyReceive && photoVerifyPending) { setError('Choose whether the photo or barcode product is correct before saving.'); setDialog('miss-photo'); return; }
+    if (!titleOnlyReceive && photoTitleConfirmed && !isCompleteReceiveTitle(form.title, form.brand)) {
       setError('Enter a descriptive product title with the item type and visible size, color, or material before saving.'); return;
     }
     if (!manual && current?.status === 'loading') { setError('Lookup still running…'); return; }
     const quantity = Number(form.quantity);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
-    let acceptedStockPhotoPath = doNotList ? '' : stockPhotoPath;
+    let acceptedStockPhotoPath = titleOnlyReceive ? '' : stockPhotoPath;
     const stockUrl = String(current?.result?.stock_photos?.find(photo => photo?.url)?.url || merged?.images?.[0] || '');
-    if (!doNotList && !acceptedStockPhotoPath && !manual && stockUrl && current?.upc) {
+    if (!titleOnlyReceive && !acceptedStockPhotoPath && !manual && stockUrl && current?.upc) {
       acceptedStockPhotoPath = await stageStockPhoto(stockUrl, current.upc, current.id) || '';
     }
-    if (photoBusy && files.length) { setError('Wait for the unit photo to finish uploading.'); return; }
-    if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
+    if (!titleOnlyReceive && photoBusy && files.length) { setError('Wait for the unit photo to finish uploading.'); return; }
+    if (!titleOnlyReceive && files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {
       setError('Photos must be images under 15 MB each.'); return;
     }
-    if (files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
+    if (!titleOnlyReceive && files.some(f => f.size < PHOTO_MIN_BYTES)) { setError('One of the photos looks empty or too small. Retake it.'); return; }
     const parsed = parse();
     if (!parsed) return;
     const ensuredCategory = storeCategoryValue();
@@ -1521,15 +1522,15 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       setForm(prev => (prev.category.trim() ? prev : { ...prev, category: ensuredCategory }));
     }
     const gaps = missingFor(parsed);
-    if (gaps.length || (!doNotList && channelMissing > 0)) {
+    if (gaps.length || (!titleOnlyReceive && channelMissing > 0)) {
       setShowSaveValidation(true);
-      const names = [...gaps, ...(!doNotList && channelMissing > 0 ? ['channel specifics'] : [])];
-      revealSection(receiveSectionForGap(gaps[0] || 'item'));
+      const names = [...gaps, ...(!titleOnlyReceive && channelMissing > 0 ? ['channel specifics'] : [])];
+      if (!titleOnlyReceive) revealSection(receiveSectionForGap(gaps[0] || 'item'));
       setError(`Still needed: ${names.join(', ')}.`);
       return;
     }
-    if (!doNotList && !dupAck && !ackDup && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
-    if (doNotList) setWarning('Saving without listing — hidden from the website and marketplaces.');
+    if (!titleOnlyReceive && !dupAck && !ackDup && dups && dups.count > 0) { setError('Tap Add another unit to confirm this is a new physical item.'); return; }
+    if (titleOnlyReceive) setWarning('Saving without listing — hidden from the website and marketplaces.');
     await receive(parsed, null, acceptedStockPhotoPath);
   }
 
@@ -1540,9 +1541,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const receiveStarted = performance.now();
     try {
       const quantity = Number(form.quantity);
-      if (!mediaWaived && !files.length && !stagedPhotoPaths.length) throw new Error('Add a photo you took or chose before saving. A stock photo does not count.');
-      if (files.length && !stagedPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
-      const unitPhotoPaths = [...(acceptedStockPhotoPath ? [acceptedStockPhotoPath] : []), ...stagedPhotoPaths];
+      if (!titleOnlyReceive && !files.length && !stagedPhotoPaths.length) throw new Error('Add a photo you took or chose before saving. A stock photo does not count.');
+      if (!titleOnlyReceive && files.length && !stagedPhotoPaths.length) throw new Error('The unit photo did not finish uploading. Retry the photo.');
+      const unitPhotoPaths = titleOnlyReceive ? [] : [...(acceptedStockPhotoPath ? [acceptedStockPhotoPath] : []), ...stagedPhotoPaths];
       const holdLabel = hold ? (HOLD_REASONS.find(([k]) => k === hold.reason)?.[1] || hold.reason) : '';
       const notes = [
         isDefectiveCondition(form.condition) ? `Defective/non-sellable: ${form.conditionNote.trim()}` : '',
@@ -1552,24 +1553,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       // Every lookup path (UPC, Floor catalog and AI photo identity) passes the
       // same conservative cleanup before persistence. Uncertain identities carry
       // a review flag rather than silently asserting a seller name as a brand.
-      const staffDnl = staffMode && doNotList;
-      const rawBrand = staffDnl || form.unbranded ? '' : form.brand.trim();
+      const rawBrand = titleOnlyReceive || form.unbranded ? '' : form.brand.trim();
       const rawTitle = form.title.trim() || composeListingTitle(form.brand, form.model, form.unbranded);
       const productIdentity = cleanProductIdentity({ brand: rawBrand, model: form.model, title: rawTitle, description: form.description });
       const brandValue = form.unbranded ? 'Unbranded' : productIdentity.brand || 'No brand';
       const modelValue = productIdentity.model;
-      const titleValue = staffDnl ? form.title.trim() : productIdentity.title;
+      const titleValue = titleOnlyReceive ? form.title.trim() : productIdentity.title;
       const fields = {
         p_quantity: quantity,
-        p_brand: staffMode && doNotList ? '' : brandValue,
-        p_model: modelValue,
+        p_brand: titleOnlyReceive ? '' : brandValue,
+        p_model: titleOnlyReceive ? '' : modelValue,
         p_title: titleValue,
-        p_category: storeCategoryValue() || null,
-        p_description: form.description.trim() || null,
-        p_condition: staffMode && doNotList ? SCRATCH : (form.condition || null),
+        p_category: titleOnlyReceive ? null : (storeCategoryValue() || null),
+        p_description: titleOnlyReceive ? null : (form.description.trim() || null),
+        p_condition: titleOnlyReceive ? SCRATCH : (form.condition || null),
         p_test_status: form.testStatus || null,
-        p_ask_cents: hold || doNotList ? null : parsed.ask, // held and store-only units never get an ask
-        p_cost_cents: staffMode || doNotList ? null : parsed.cost,
+        p_ask_cents: hold || titleOnlyReceive ? null : parsed.ask, // held and store-only units never get an ask
+        p_cost_cents: staffMode || titleOnlyReceive ? null : parsed.cost,
         p_notes: notes || null,
         p_upc: form.noUpc ? null : (form.upc.trim() || current?.upc || null),
         p_shippable: form.shippable || 'auto',
@@ -1584,23 +1584,23 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         enrichment.specs.product_name_review_reasons = productIdentity.reasons;
       }
       enrichment.brand = brandValue; enrichment.model = modelValue; enrichment.title = titleValue;
-      const ebayAttrs = doNotList
+      const ebayAttrs = titleOnlyReceive
         ? {}
         : withFloorBrandOnEbay(ebayAspects.attributes, ebayAspects.fields, brandValue);
       const data = await commitReceive(client, storeId, {
         p_request: receiveRequest.current, p_fields: fields, p_photos: unitPhotoPaths,
-        p_extras: { location: selectedLocation || null, manifest: staffMode ? null : manifestId || null,
-          dns: !staffMode && doNotShip, do_not_list: doNotList, defective: isDefectiveCondition(form.condition),
-          channels: staffMode ? [] : channels, enrichment,
-          stock_photo_paths: acceptedStockPhotoPath ? [acceptedStockPhotoPath] : [],
-          ebay_category_id: doNotList ? null : ebayAspects.categoryId,
+        p_extras: { location: titleOnlyReceive ? null : (selectedLocation || null), manifest: staffMode || titleOnlyReceive ? null : manifestId || null,
+          dns: !staffMode && doNotShip && !titleOnlyReceive, do_not_list: doNotList, defective: titleOnlyReceive,
+          channels: staffMode || titleOnlyReceive ? [] : channels, enrichment,
+          stock_photo_paths: titleOnlyReceive ? [] : (acceptedStockPhotoPath ? [acceptedStockPhotoPath] : []),
+          ebay_category_id: titleOnlyReceive ? null : ebayAspects.categoryId,
           ebay_attributes: ebayAttrs,
-          ebay_condition_id: doNotList ? null : (ebayAspects.allowedGrades || []).find(grade => grade.grade === (form.condition === 'Defective' ? 'For parts' : form.condition))?.conditionId || null,
-          photo_identity_confirmed: photoTitleConfirmed,
-          photo_identity_type: photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
+          ebay_condition_id: titleOnlyReceive ? null : (ebayAspects.allowedGrades || []).find(grade => grade.grade === (form.condition === 'Defective' ? 'For parts' : form.condition))?.conditionId || null,
+          photo_identity_confirmed: titleOnlyReceive ? false : photoTitleConfirmed,
+          photo_identity_type: !titleOnlyReceive && photoTitleConfirmed ? text(photoIdentity?.item_type) : '' },
       });
       const skus = data.skus as string[];
-      if (ebayAspects.categoryId && skus[0] && !doNotList) {
+      if (ebayAspects.categoryId && skus[0] && !titleOnlyReceive) {
         try {
           await client.rpc('portal_set_unit_ebay_category', { p_sku: skus[0], p_category_id: ebayAspects.categoryId });
           await fetch(floorFunctionUrl('ebay-specifics'), {
@@ -2356,7 +2356,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>
       {!appChrome && (
         <div>
-          <p>{staffMode && doNotList ? 'DNL: condition is defective. Only a title is required.' : doNotList ? 'Store-only: brand is required; all other fields and the photo are optional.' : manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
+          <p>{titleOnlyReceive ? 'Only a title is required. No photo or other details.' : manual ? 'Manual entry: fill listing fields, add a photo, then receive.' : 'Scan a UPC, edit the listing fields, add a photo, then receive.'}</p>
           <button type="button" className="text-button" onClick={toggleManual}>{manual ? '← Back to scan' : 'Enter manually'}</button>
         </div>
       )}
@@ -2576,16 +2576,18 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
       </div>}
 
       <div className={`receive-advanced${manual ? ' receive-manual' : ''}`}><div className="unit-edit-grid receive-v2-grid">
-        {staffMode && manual && !doNotList && <label className="rcv-check receive-v2-span2"><input type="checkbox" checked={false} onChange={() => { setDoNotList(true); setChannels([]); }} /> DNL — Do not list</label>}
-        {staffMode && doNotList && <div className="rcv-dnl">
-          <label className="rcv-check"><input type="checkbox" checked onChange={() => setDoNotList(false)} /> DNL — Do not list</label>
-          <p className="hint">Saving sets the condition to Defective/non-sellable. Only a title is required. No photo, brand, or price. Unchecking brings the rest of the form back.</p>
+        {staffMode && manual && !titleOnlyReceive && <label className="rcv-check receive-v2-span2"><input type="checkbox" checked={false} onChange={() => { setDoNotList(true); setChannels([]); }} /> DNL — Do not list</label>}
+        {titleOnlyReceive && <div className="rcv-dnl">
+          <label className="rcv-check"><input type="checkbox" checked={doNotList} onChange={e => { const on = e.target.checked; setDoNotList(on); if (on) setChannels([]); }} /> {staffMode ? 'DNL — Do not list' : 'Do not list for sale'}</label>
+          <label className="rcv-check"><input type="checkbox" checked={isDefectiveCondition(form.condition)} onChange={e => update('condition', e.target.checked ? SCRATCH : '')} /> Defective</label>
+          <p className="hint">Only a title is required. No photo, brand, price, or other details. Uncheck both to bring the rest of the form back.</p>
           <label className={invalid('title') ? 'receive-v2-invalid' : undefined}>
             <span className="receive-v2-label">Title<span className="receive-v2-req"> *</span></span>
             <input value={form.title} onChange={e => update('title', e.target.value)} placeholder="What is it" autoComplete="off" />
           </label>
+          {invalid('title') && <span className="receive-v2-msg">{receiveFieldMessage('title')}</span>}
         </div>}
-        {!manual && current && (trueMiss ? <div className="rcv-miss">
+        {!manual && current && !titleOnlyReceive && (trueMiss ? <div className="rcv-miss">
           <strong>No match for this UPC</strong>
           <small>Take one photo and we’ll fill in the rest</small>
           <div className="rcv-miss-actions">
@@ -2602,7 +2604,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <strong>{merged?.title || form.title || 'Item'}</strong>
           <small>Found by UPC · filled in for you</small>
         </div>)}
-        {unifiedV2 && !(staffMode && doNotList) && <ReceiveSection id="photos" title="Photos" required={!mediaWaived} open={sectionOpen('photos')} onOpen={toggleSection}
+        {unifiedV2 && !titleOnlyReceive && <ReceiveSection id="photos" title="Photos" required={!mediaWaived} open={sectionOpen('photos')} onOpen={toggleSection}
           tone={!personPhotoReady() && !mediaWaived ? 'bad' : 'muted'}
           status={(() => {
             const count = files.length || stagedPhotoPaths.length;
@@ -2655,7 +2657,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </div>
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="item" title="Item" required={!doNotList} keepMounted open={sectionOpen('item')} onOpen={toggleSection}
+        {!titleOnlyReceive && <ReceiveSection id="item" title="Item" required={!doNotList} keepMounted open={sectionOpen('item')} onOpen={toggleSection}
           tone={liveMissing.some(g => receiveSectionForGap(g) === 'item') ? 'bad' : 'muted'}
           status={liveMissing.filter(g => receiveSectionForGap(g) === 'item').length
             ? (liveMissing.filter(g => receiveSectionForGap(g) === 'item').length === 1
@@ -2672,7 +2674,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="price" title="Price & condition" required={!doNotList} open={sectionOpen('price')} onOpen={toggleSection}
+        {!titleOnlyReceive && <ReceiveSection id="price" title="Price & condition" required={!doNotList} open={sectionOpen('price')} onOpen={toggleSection}
           tone={liveMissing.some(g => receiveSectionForGap(g) === 'price') ? 'bad' : 'muted'}
           status={form.ask && form.condition ? `$${form.ask} · ${form.condition}` : doNotList ? 'Optional' : 'Required'}>
         <div className="receive-v2-row2">
@@ -2697,7 +2699,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         <ReceiveQuantity value={form.quantity} onChange={value => update('quantity', value)} disabled={busy} />
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="size" title="Size & weight" required={!mediaWaived} open={sectionOpen('size')} onOpen={toggleSection}
+        {!titleOnlyReceive && <ReceiveSection id="size" title="Size & weight" required={!mediaWaived} open={sectionOpen('size')} onOpen={toggleSection}
           tone={!dimensionsReady() && !mediaWaived ? 'bad' : 'muted'}
           status={dimensionsReady() ? (!manual && current && !trueMiss ? 'From UPC' : `${form.length} × ${form.width} × ${form.height} in · ${form.weight} lb`) : mediaWaived ? (doNotList ? 'Optional (not listed)' : 'Optional (defective)') : 'Required'}>
           <div className="receive-v2-dims">
@@ -2710,7 +2712,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           <p className="rcv-note">Box weight is the packaged ship weight. Item weight is the product itself.</p>
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="location" title="Location" required={!doNotList} open={sectionOpen('location')} onOpen={toggleSection}
+        {!titleOnlyReceive && <ReceiveSection id="location" title="Location" required={!doNotList} open={sectionOpen('location')} onOpen={toggleSection}
           tone={!selectedLocation.trim() && !doNotList ? 'bad' : 'muted'}
           status={selectedLocation
             ? locationMenuLabel(receiveLocations.find(l => l.code === selectedLocation) || { code: selectedLocation })
@@ -2725,7 +2727,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {!selectedLocation.trim() && !doNotList && showSaveValidation && <span className="receive-v2-msg">{receiveFieldMessage('location')}</span>}
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="upc" title="UPC" open={sectionOpen('upc')} onOpen={toggleSection}
+        {!titleOnlyReceive && <ReceiveSection id="upc" title="UPC" open={sectionOpen('upc')} onOpen={toggleSection}
           tone={invalid('upc') ? 'bad' : 'muted'}
           status={form.noUpc ? 'Not set' : (form.upc || current?.upc || 'Not set')}>
         <label className={invalid('upc') ? 'receive-v2-invalid' : undefined}>
@@ -2753,11 +2755,11 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         </label>
         </ReceiveSection>}
 
-        {!staffMode && <ReceiveSection id="sell" title="Sell on" open={sectionOpen('sell')} onOpen={toggleSection} status={channels.length ? channels.map(c => c === 'tiktok' ? 'TikTok' : c === 'ebay' ? 'eBay' : 'Amazon').join(', ') : 'None'}>
+        {!staffMode && !titleOnlyReceive && <ReceiveSection id="sell" title="Sell on" open={sectionOpen('sell')} onOpen={toggleSection} status={channels.length ? channels.map(c => c === 'tiktok' ? 'TikTok' : c === 'ebay' ? 'eBay' : 'Amazon').join(', ') : 'None'}>
           <ChannelPicker bare value={channels} onChange={setChannels} disabled={doNotList || doNotShip} upc={form.noUpc ? '' : (form.upc || current?.upc || '')} />
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="flags" title="Flags" open={sectionOpen('flags')} onOpen={toggleSection}
+        {!titleOnlyReceive && <ReceiveSection id="flags" title="Flags" open={sectionOpen('flags')} onOpen={toggleSection}
           status={[doNotShip && 'Do not ship', doNotList && 'Do not list', isDefectiveCondition(form.condition) && 'Defective'].filter(Boolean).join(' · ') || 'None'}>
           {!staffMode && <label className="rcv-check"><input type="checkbox" checked={doNotShip} disabled={dnsRequired} onChange={e => { setDns(e.target.checked); if (e.target.checked) setChannels([]); }} /> Do not ship</label>}
           <label className="rcv-check"><input type="checkbox" checked={doNotList} onChange={e => { const on = e.target.checked; setDoNotList(on); if (on) setChannels([]); }} /> {staffMode ? 'DNL — Do not list' : 'Do not list for sale'}</label>
@@ -2765,7 +2767,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {needNoteForScratch && <label>Defect note<textarea rows={2} value={form.conditionNote} onChange={e => update('conditionNote', e.target.value)} /></label>}
         </ReceiveSection>}
 
-        {!(staffMode && doNotList) && <ReceiveSection id="details" title="Details" open={sectionOpen('details')} onOpen={toggleSection}
+        {!titleOnlyReceive && <ReceiveSection id="details" title="Details" open={sectionOpen('details')} onOpen={toggleSection}
           tone="muted"
           status={form.title.trim() ? 'Title set' : 'Optional'}>
           <label>Title<input value={form.title} onChange={e => update('title', e.target.value)} placeholder="Brand + specifics" autoComplete="off" /></label>
@@ -2774,7 +2776,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
           {!staffMode && <label>Manifest<select value={manifestId} onChange={e => setManifestId(e.target.value)}><option value="">No manifest</option>{manifests.map(m => <option key={m.id} value={m.id}>{m.name} · {m.manifest_on}</option>)}</select></label>}
         </ReceiveSection>}
 
-        {!staffMode && <ReceiveSection id="bundle" title="Bundle items" open={sectionOpen('bundle')} onOpen={toggleSection} status="Optional">
+        {!staffMode && !titleOnlyReceive && <ReceiveSection id="bundle" title="Bundle items" open={sectionOpen('bundle')} onOpen={toggleSection} status="Optional">
           <BundleReceive client={client} lastReceived={saved[0]} onSaved={onSaved} />
         </ReceiveSection>}
 
@@ -2830,13 +2832,13 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               : `Missing for listing: ${liveMissing.join(', ')}. You can still receive; incomplete units land in Needs attention.`}
       </p>}
       <div className="receive-v2-pin">
-        {liveMissing.length > 0 && <button type="button" className="rcv-needed" onClick={() => { setShowSaveValidation(true); revealSection(receiveSectionForGap(liveMissing[0])); }}>
+        {liveMissing.length > 0 && <button type="button" className="rcv-needed" onClick={() => { setShowSaveValidation(true); if (!titleOnlyReceive) revealSection(receiveSectionForGap(liveMissing[0])); }}>
           Still needed: {liveMissing.join(', ')}
         </button>}
-        <button type="submit" className={`receive-v2-save${formValid ? '' : ' is-dim'}`} disabled={busy || photoBusy || !formValid}>
+        <button type="submit" className={`receive-v2-save${formValid ? '' : ' is-dim'}`} disabled={busy || (!titleOnlyReceive && photoBusy) || !formValid}>
           {busy ? 'Saving…' : 'Save item'}
         </button>
-        {!manual && <button type="submit" className={`secondary rcv-scan-next${formValid ? '' : ' is-dim'}`} disabled={busy || photoBusy || !formValid}>Save and scan next</button>}
+        {!manual && <button type="submit" className={`secondary rcv-scan-next${formValid ? '' : ' is-dim'}`} disabled={busy || (!titleOnlyReceive && photoBusy) || !formValid}>Save and scan next</button>}
       </div>
       {!manual && current && <button type="button" className="secondary" disabled={busy} onClick={skipCurrent}>Skip this scan</button>}
       </div>
