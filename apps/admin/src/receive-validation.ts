@@ -16,7 +16,7 @@ export type ReceiveFieldKey =
   | 'dimensions'
   | 'location';
 
-/** Defective or Do not list waives the photo and the dimensions. Either flag is enough. */
+/** Do not list or Defective: the receive is finished after a title. */
 export function receiveMediaWaived(doNotList: boolean, defective: boolean) {
   return doNotList || defective;
 }
@@ -41,15 +41,16 @@ export function receiveMissingFields({
   defective?: boolean;
   hasDimensions?: boolean;
   hasLocation?: boolean;
-  /** Staff DNL: a title is the only field. */
+  /** Kept so older callers can still force the title-only check. */
   titleOnly?: boolean;
   titleReady?: boolean;
 }): string[] {
   void brandReady;
+  void titleOnly;
   const waive = receiveMediaWaived(doNotList, defective);
-  if (doNotList) {
+  if (waive) {
     const out: string[] = [];
-    if (titleOnly && !titleReady) out.push('title');
+    if (!titleReady) out.push('title');
     if (!quantityOk) out.push('quantity');
     return out;
   }
