@@ -33,7 +33,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
     }));
   }, [phase]);
   const [manual, setManual] = useState(false);
-  const [entry, setEntry] = useState<'scan' | 'identify'>('scan');
+  const [entry, setEntry] = useState<'scan' | 'identify' | 'manual'>('scan');
   const [pendingUpc, setPendingUpc] = useState<string | null>(null);
   const [nextSku, setNextSku] = useState<string | null>(null);
   const [today, setToday] = useState<{ sku: string; title: string; location: string; at: string }[]>([]);
@@ -130,7 +130,7 @@ export function AppReceive({ client, storeId, accessToken, staffMode = false, on
         </label>
         <button type="submit">Look up</button>
       </form>
-      <button type="button" onClick={() => { setPendingUpc(null); setEntry('identify'); openForm(false); }}>No barcode</button>
+      <button type="button" onClick={() => { setPendingUpc(null); setEntry('manual'); openForm(true); }}>No barcode</button>
       <ManifestSearchBox client={client} onPick={line => {
         const code = line.upc_normalized || line.item_number;
         if (!code) return;

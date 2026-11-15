@@ -66,14 +66,14 @@ export function ReceiveWizard({
   onScan: (code: string) => void;
   onReject: () => void;
   onAccept: () => void | Promise<void>;
-  entry?: 'scan' | 'identify';
+  entry?: 'scan' | 'identify' | 'manual';
   holdForLookup?: boolean;
   nextSku?: string;
   upc?: string;
   savedNotice?: string;
 }) {
   const [step, setStep] = useState<ReceiveStepId | 'scan' | 'lookup' | 'identify'>(
-    entry === 'identify' ? 'identify' : (holdForLookup ? 'lookup' : 'scan'),
+    entry === 'identify' ? 'identify' : entry === 'manual' ? 'brand' : (holdForLookup ? 'lookup' : 'scan'),
   );
   const [bay, setBay] = useState<number | null>(null);
   const [row, setRow] = useState<number | null>(null);
@@ -91,7 +91,8 @@ export function ReceiveWizard({
     hasDims: [form.productDepth, form.productWidth, form.productHeight, form.productWeight].every(value => Number(value) > 0),
     hasStockMatch: stockMatches.length > 0,
     manifestPrice: usesManifestPrice,
-  }), [doNotList, form, stockMatches.length, usesManifestPrice]);
+    noBarcode: entry === 'manual',
+  }), [doNotList, form, stockMatches.length, usesManifestPrice, entry]);
 
   useEffect(() => {
     document.body.classList.add('receive-steps-open');
@@ -102,6 +103,7 @@ export function ReceiveWizard({
     if (!lookupId) {
       seen.current = null;
       if (entry === 'identify') setStep('identify');
+      else if (entry === 'manual') setStep(current => (current === 'scan' || current === 'identify' || current === 'lookup' ? 'brand' : current));
       else if (!holdForLookup) setStep('scan');
       return;
     }
@@ -123,6 +125,7 @@ export function ReceiveWizard({
       return;
     }
     if (step === 'confirm' && delta < 0) { onClear(); return; }
+    if (entry === 'manual' && delta < 0 && step === plan[0]) { onCancel(); return; }
     if (delta > 0 && step === 'brand' && !form.brand.trim()) return;
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
     if (delta > 0 && step === 'dims' && ![form.productDepth, form.productWidth, form.productHeight, form.productWeight].every(value => Number(value) > 0)) return;

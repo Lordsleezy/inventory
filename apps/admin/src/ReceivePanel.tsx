@@ -193,8 +193,8 @@ type Props = {
   /** Phone-only presentation for the Android Chrome-installed clerk app. */
   storePhoneMode?: boolean;
   initialManual?: boolean;
-  /** Phone Receive home: open the photo step instead of the barcode scanner. */
-  initialEntry?: 'scan' | 'identify';
+  /** Phone Receive home: scan, identify from a photo, or enter details with no barcode. */
+  initialEntry?: 'scan' | 'identify' | 'manual';
   /** Prefill / enqueue a UPC from an earlier camera capture. */
   initialUpc?: string | null;
   onAppCancel?: () => void;
@@ -643,11 +643,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [stockPhotoBusy, setStockPhotoBusy] = useState(false);
   const [stockPhotoError, setStockPhotoError] = useState('');
   const [stockPhotoBroken, setStockPhotoBroken] = useState(false);
-  const [manual, setManual] = useState(!!initialManual);
+  const [manual, setManual] = useState(!!initialManual || initialEntry === 'manual');
   const [draft, setDraft] = useState('');
   const [queue, setQueue] = useState<Scan[]>([]);
   const [loadedId, setLoadedId] = useState<string | null>(null);
-  const [form, setForm] = useState<Form>(blank);
+  const [form, setForm] = useState<Form>(() => (
+    initialEntry === 'manual' || initialManual ? { ...blank, noUpc: true, upc: '' } : blank
+  ));
+  useEffect(() => {
+    if (initialEntry !== 'manual' && !initialManual) return;
+    setForm(prev => (prev.noUpc ? prev : { ...prev, noUpc: true, upc: '' }));
+  }, [initialEntry, initialManual]);
   const [files, setFiles] = useState<File[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
   const [savedNotice, setSavedNotice] = useState('');
@@ -2230,8 +2236,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         miss={isTrueCatalogMiss(result)} title={foundTitle} brand={foundBrand}
         details={[result?.receive?.item_number, text(result?.merged?.category)].filter(Boolean).join(' · ')}
         source={result?.receive?.suggested ? `Possible match · manifest ${lot || 'TRA-7096264'}` : (result?.receive?.item_number ? `Found by UPC · manifest ${lot || 'TRA-7096264'}` : 'Found by UPC')}
-        entry={initialEntry === 'identify' ? 'identify' : 'scan'}
-        holdForLookup={Boolean(initialUpc) && initialEntry !== 'identify'}
+        entry={initialEntry === 'identify' ? 'identify' : initialEntry === 'manual' ? 'manual' : 'scan'}
+        holdForLookup={Boolean(initialUpc) && initialEntry !== 'identify' && initialEntry !== 'manual'}
         stockUrl={stockPhotoUrls[0]?.url || ''}
         onWrongPhoto={() => {
           const url = stockPhotoUrls[0]?.url;
@@ -2284,7 +2290,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         addingToStock={busy}
         busy={busy} error={error || photoIdError}
         nextSku={options?.next_sku || ''}
-        upc={form.upc || current?.upc || ''}
+        upc={form.noUpc ? 'No UPC' : (form.upc || current?.upc || '')}
         savedNotice={savedNotice}
         onSave={() => { void finish(undefined, true); }}
         onCancel={() => onAppCancel?.()}

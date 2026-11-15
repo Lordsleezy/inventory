@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { adjacentReceiveStep, receiveStepPlan } from './receiveSteps.ts';
 
 test('a full catalog hit only asks for the photo, condition, price, and location', () => {
@@ -43,6 +44,16 @@ test('a used unit still asks for a price when the manifest has one', () => {
     doNotList: false, brand: 'Kohler', title: 'Terzet',
     hasDims: true, hasStockMatch: false, manifestPrice: false,
   }), ['confirm', 'photo', 'condition', 'price', 'location', 'review']);
+});
+
+test('no barcode asks for the details before the camera', async () => {
+  assert.deepEqual(receiveStepPlan({
+    doNotList: false, brand: '', title: '',
+    hasDims: false, hasStockMatch: false, noBarcode: true,
+  }), ['brand', 'title', 'condition', 'price', 'dims', 'photo', 'location', 'review']);
+  const home = await readFile(new URL('./appMode/AppReceive.tsx', import.meta.url), 'utf8');
+  assert.match(home, /setEntry\('manual'\); openForm\(true\)/);
+  assert.doesNotMatch(home, /setEntry\('identify'\)/);
 });
 
 test('eBay category and specifics never get a Receive screen', () => {

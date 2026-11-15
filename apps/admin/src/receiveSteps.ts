@@ -32,8 +32,10 @@ export function receiveStepPlan(input: {
   hasStockMatch: boolean;
   /** New or Open box, and the manifest already has a retail price. */
   manifestPrice?: boolean;
+  /** No barcode: ask for the item details before any camera step. */
+  noBarcode?: boolean;
 }): ReceiveStepId[] {
-  const steps: ReceiveStepId[] = ['confirm', 'photo'];
+  const steps: ReceiveStepId[] = input.noBarcode ? [] : ['confirm', 'photo'];
   if (!input.brand.trim()) steps.push('brand');
   if (!input.doNotList && !input.title.trim()) steps.push('title');
   steps.push('condition');
@@ -42,6 +44,7 @@ export function receiveStepPlan(input: {
     if (!input.hasDims) steps.push('dims');
     if (input.hasStockMatch) steps.push('stock');
   }
+  if (input.noBarcode) steps.push('photo');
   steps.push('location', 'review');
   return steps;
 }
