@@ -71,14 +71,28 @@ declare
     perform set_config('floor.receive_dnl_title_only', 'true', true);
   end if;
  elsif v_do_not_list and not public.receive_not_for_sale_brand_is_valid(p_fields->>'p_brand') then raise exception 'Brand required' using errcode='22023'; end if;$old$;
-  new_gate text := $new$if v_do_not_list
-   or coalesce((p_extras->>'defective')::boolean, false)
-   or coalesce(p_fields->>'p_condition', '') ~* '^\s*(defective|scratch)' then
-  if nullif(btrim(coalesce(p_fields->>'p_title', '')), '') is null then
-    raise exception 'Title required' using errcode='22023';
-  end if;
+  new_gate text := $new$if nullif(btrim(coalesce(p_fields->>'p_title', '')), '') is not null
+   and (
+     not public.receive_not_for_sale_brand_is_valid(p_fields->>'p_brand')
+     or coalesce((p_extras->>'defective')::boolean, false)
+     or coalesce(p_fields->>'p_condition', '') ~* '^\s*(defective|scratch)'
+   )
+   and (
+     v_do_not_list
+     or coalesce((p_extras->>'defective')::boolean, false)
+     or coalesce(p_fields->>'p_condition', '') ~* '^\s*(defective|scratch)'
+   ) then
   p_fields := jsonb_set(p_fields, '{p_condition}', to_jsonb('Defective/non-sellable'::text), true);
   perform set_config('floor.receive_dnl_title_only', 'true', true);
+elsif v_do_not_list and not public.receive_not_for_sale_brand_is_valid(p_fields->>'p_brand') then
+  raise exception 'Title required' using errcode='22023';
+elsif (
+    coalesce((p_extras->>'defective')::boolean, false)
+    or coalesce(p_fields->>'p_condition', '') ~* '^\s*(defective|scratch)'
+  ) and nullif(btrim(coalesce(p_fields->>'p_title', '')), '') is null then
+  raise exception 'Title required' using errcode='22023';
+elsif v_do_not_list and not adm then
+  p_fields := jsonb_set(p_fields, '{p_condition}', to_jsonb('Defective/non-sellable'::text), true);
 end if;$new$;
   old_photo text := $old$if coalesce(cardinality(p_photos),0)=0 and not v_do_not_list then raise exception 'unit_photo_required' using errcode='23514';end if;$old$;
   new_photo text := $new$if coalesce(cardinality(p_photos),0)=0 and not v_do_not_list and coalesce(current_setting('floor.receive_dnl_title_only', true), '') <> 'true' then raise exception 'unit_photo_required' using errcode='23514';end if;$new$;
