@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { amazonImageLocatorPatches, orderedListingImages, tiktokMainImagePayload } from './listing-image-payloads.mjs';
+import { amazonImageLocatorPatches, orderedListingImages, stockFirstRows, tiktokMainImagePayload } from './listing-image-payloads.mjs';
+
+test("stock photos stay ahead of the unit photo when a listing is built", () => {
+  const ordered = stockFirstRows([
+    { path: "unit.jpg", source: "camera", sort_order: 0 },
+    { path: "stock-b.jpg", source: "stock", sort_order: 1 },
+    { path: "stock-a.jpg", source: "stock", sort_order: 0 },
+  ]);
+  assert.deepEqual(ordered.map((row) => row.path), ["stock-a.jpg", "stock-b.jpg", "unit.jpg"]);
+});
 
 test('marketplace photos keep stock first, retain a real unit photo, dedupe and honor channel limit', () => {
   assert.deepEqual(orderedListingImages(['https://stock/1', 'https://stock/2'],

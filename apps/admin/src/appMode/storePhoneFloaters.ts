@@ -35,7 +35,9 @@ export function removeStorePhoneCornerControls(doc: Document): number {
   if (!view) return 0;
   const viewport = { width: view.innerWidth, height: view.innerHeight };
   let removed = 0;
-  for (const el of doc.body.querySelectorAll<HTMLElement>('button, a, [role="button"], [role="status"]')) {
+  const nodes = doc.body.querySelectorAll<HTMLElement>('button, a, [role="button"], [role="status"]');
+  for (let i = 0; i < nodes.length; i++) {
+    const el = nodes[i];
     const style = view.getComputedStyle(el);
     const rect = el.getBoundingClientRect();
     if (!shouldRemoveStorePhoneControl({

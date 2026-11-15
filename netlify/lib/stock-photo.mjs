@@ -24,12 +24,17 @@ export function stockPhotoVerdict(url) {
   return "unverified";
 }
 
-/** A photo row may be { url, source } or a bare URL. Manufacturer source is an explicit fetch. */
+/** A photo row may be { url, source } or a bare URL. Manufacturer and Costco
+ * sources are explicit fetches. eBay catalog images are the one ebayimg set
+ * kept, because they are the product record for that GTIN, not a seller ad. */
 export function keepStockPhoto(row) {
   const url = typeof row === "string" ? row : row?.url;
   const source = typeof row === "string" ? "" : String(row?.source || "");
   if (!url || !/^https?:/i.test(url)) return false;
+  const host = stockPhotoHost(url);
+  if (source === "ebay_catalog") return /(^|\.)ebayimg\.com$/i.test(host);
   if (stockPhotoVerdict(url) === "seller") return false;
-  if (source === "manufacturer") return stockPhotoVerdict(url) !== "seller";
+  if (source === "manufacturer") return true;
+  if (source === "costco") return /costco|scene7/i.test(`${host} ${url}`);
   return stockPhotoVerdict(url) === "amazon";
 }

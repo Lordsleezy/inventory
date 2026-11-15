@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { buildCostcoReceive, candidateTitles, classifyCostcoLine, manifestItemFromText, nearestManifestLine, stockImagesForLine } from "./costco-receive.mjs";
+import { chooseCatalogStockPhotos } from "./stock-photo-match.mjs";
+import { keepStockPhoto } from "./stock-photo.mjs";
 
 const line = {
   tcin: "3858210",
@@ -253,4 +255,33 @@ test("a unique barcode within 3 digits suggests that line, and a tie does not", 
   ];
   assert.equal(nearestManifestLine("079400536762", lines).line.item_number, "2067097");
   assert.equal(nearestManifestLine("079400533746", lines), null);
+});
+
+test("a brand-matching catalog photo is kept and a replacement is not", () => {
+  const images = chooseCatalogStockPhotos({
+    brand: "Jolie",
+    title: "Jolie The Filtered Showerhead",
+    catalogs: [
+      { brand: "Generic", title: "Replacement Filter for the Jolie Showerhead", images: ["https://m.media-amazon.com/images/I/filter.jpg"] },
+      { brand: "Jolie Skin Company", title: "Jolie Filtered Showerhead, High Pressure", images: ["https://m.media-amazon.com/images/I/jolie.jpg"] },
+    ],
+  });
+  assert.deepEqual(images, ["https://m.media-amazon.com/images/I/jolie.jpg"]);
+});
+
+test("a different color is not used as the stock photo", () => {
+  const images = chooseCatalogStockPhotos({
+    brand: "Jolie",
+    title: "Jolie Filtered Showerhead",
+    color: "gold",
+    catalogs: [{ brand: "Jolie", title: "Jolie Filtered Showerhead Jet Black", images: ["https://m.media-amazon.com/images/I/black.jpg"] }],
+  });
+  assert.deepEqual(images, []);
+});
+
+test("Costco's own photo is kept and another seller's photo is not", () => {
+  assert.equal(keepStockPhoto({ url: "https://bfasset.costco-static.com/a.jpg", source: "costco" }), true);
+  assert.equal(keepStockPhoto({ url: "https://i.ebayimg.com/images/g/seller.jpg", source: "costco" }), false);
+  assert.equal(keepStockPhoto("https://i5.walmartimages.com/asr/jerky.jpeg"), false);
+  assert.equal(keepStockPhoto({ url: "https://m.media-amazon.com/images/I/a.jpg", source: "amazon" }), true);
 });

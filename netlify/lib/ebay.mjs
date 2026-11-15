@@ -17,6 +17,7 @@ import {
 } from "./ebay-env.mjs";
 import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
+import { stockFirstRows } from "./listing-image-payloads.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { appendClearanceFooter } from "./ebay-listing-standards.mjs";
@@ -627,11 +628,10 @@ export async function photoUrls(storeId, sku) {
   const sb = serviceClient();
   const { data } = await sb
     .from("photos")
-    .select("path, is_primary")
+    .select("path, source, sort_order, is_primary")
     .eq("store_id", storeId)
-    .eq("sku", sku)
-    .order("is_primary", { ascending: false });
-  const keys = (data ?? [])
+    .eq("sku", sku);
+  const keys = stockFirstRows(data)
     .map((row) => row.path)
     .filter((path) => path && !String(path).includes("/official-"));
   if (!keys.length) {

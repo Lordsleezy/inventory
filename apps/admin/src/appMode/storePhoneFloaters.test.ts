@@ -4,7 +4,7 @@ import { shouldRemoveStorePhoneControl, type FloaterBox } from './storePhoneFloa
 
 const phone = { width: 412, height: 915 };
 
-function box(partial: Partial<FloaterBox>): FloaterBox {
+function box(partial: Partial<FloaterBox> = {}): FloaterBox {
   return { top: 820, right: 400, bottom: 868, left: 336, width: 64, height: 48, ...partial };
 }
 

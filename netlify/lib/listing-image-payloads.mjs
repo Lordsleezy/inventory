@@ -11,6 +11,14 @@ export function orderedListingImages(stockUrls, unitUrls, limit = 9) {
   return selected;
 }
 
+/** Stock rows first, then the photos taken of the unit, each group in its saved order. */
+export function stockFirstRows(rows) {
+  return [...(rows || [])].sort((a, b) => {
+    const rank = (row) => row?.source === "stock" ? 0 : 1;
+    return rank(a) - rank(b) || Number(a?.sort_order || 0) - Number(b?.sort_order || 0);
+  });
+}
+
 export function amazonImageLocatorPatches(urls, marketplaceId) {
   const keys = ['main_product_image_locator', ...Array.from({ length: 8 }, (_, i) => `other_product_image_locator_${i + 1}`)];
   const safe = (urls || []).filter(isHttps).slice(0, keys.length);

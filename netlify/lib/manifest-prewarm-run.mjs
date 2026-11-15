@@ -187,7 +187,7 @@ export async function prewarmManifestLines(storeId, lines, {
                 title: costco.title || line.description,
                 brand: costco.brand || line.brand,
                 description: costco.description || line.description,
-                images: (costco.images || []).filter((url) => keepStockPhoto(url)),
+                images: (costco.images || []).filter((url) => keepStockPhoto({ url, source: "costco" })),
                 aspects: { costco_item_number: line.item_number || line.tcin, candidate_gtin: true },
                 package: costco.package || {},
               }, { source: "lookup" });
@@ -297,7 +297,7 @@ export async function prewarmManifestLines(storeId, lines, {
         });
       }
 
-      merged.images = (merged.images || []).filter((url) => keepStockPhoto({ url, source: "amazon" }) || keepStockPhoto(url));
+      merged.images = (merged.images || []).filter((url) => keepStockPhoto({ url, source: "amazon" }) || keepStockPhoto({ url, source: "costco" }));
       if (!dryRun && !isInternal && (merged.title || merged.brand)) {
         const saveSource = primary === "amazon" ? "amazon" : primary === "upcitemdb" ? "upcitemdb" : "lookup";
         if (!isCostcoInternalCode(line.upc_normalized)) {

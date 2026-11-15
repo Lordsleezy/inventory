@@ -473,6 +473,55 @@ async function linesForStore(sb, ids) {
   return rows;
 }
 
+async function withCatalogStock(sb, storeId, ctx, line, card) {
+  if (card?.merged?.images?.length || card?.receive?.internal || card?.receive?.bucket === "search" || ctx?.enrich?.stock_photo_checked) {
+    return card;
+  }
+  const { catalogStockPhotos, stockPhotoSearchTimed } = await import("./receive-stock-photos.mjs");
+  const foundPhotos = await stockPhotoSearchTimed(catalogStockPhotos(storeId, {
+    brand: card?.merged?.brand || line?.brand,
+    title: card?.merged?.title || line?.description,
+  })).catch(() => ({ images: [], timedOut: true }));
+  const images = foundPhotos.images || [];
+  const item = String(line?.tcin || line?.item_number || "");
+  if (!images.length) {
+    if (foundPhotos.timedOut) return card;
+    if (item) await remember(sb, storeId, ctx.key, ctx.book || {}, item, { stock_photo_checked: true }).catch(() => undefined);
+    return card;
+  }
+  if (item) await remember(sb, storeId, ctx.key, ctx.book || {}, item, { images, stock_photo_checked: true }).catch(() => undefined);
+  if (ctx?.gtin?.ok && !isCostcoInternalCode(ctx.gtin.gtin14)) {
+    const saved = [...new Set([...images, ...(ctx.product?.images || [])])].slice(0, 8);
+    if (ctx.product) {
+      await sb.from("floor_products").update({
+        images: saved,
+        updated_at: new Date().toISOString(),
+      }).eq("gtin14", ctx.gtin.gtin14);
+    } else {
+      const { saveFloorProduct } = await import("./floor-products.mjs");
+      await saveFloorProduct(sb, ctx.gtin, {
+        brand: card.merged?.brand || line.brand,
+        title: card.merged?.title || line.description,
+        images: saved,
+      }, { source: "lookup" });
+    }
+    if (ctx.payload) {
+      await sb.from("upc_lookup_cache").update({
+        payload: {
+          ...ctx.payload,
+          stock_photos: images.map((url) => ({ url, source: "catalog" })),
+          merged: { ...(ctx.payload.merged || {}), images },
+        },
+      }).eq("gtin14", ctx.gtin.gtin14);
+    }
+  }
+  return {
+    ...card,
+    stock_photos: images.map((url) => ({ url, source: "catalog" })),
+    merged: { ...card.merged, images },
+  };
+}
+
 export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false, retailUpcSearch } = {}) {
   const found = await findManifestLine(sb, storeId, raw);
   if (found.many.length > 1) return searchCard(found.many, stripMoney);
@@ -504,7 +553,7 @@ export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false
       });
       card.receive.suggested = true;
       card.receive.scanned_code = code;
-      return card;
+      return withCatalogStock(sb, storeId, ctx, near.line, card);
     }
     if (code.length >= 12) {
       const numbers = lines.flatMap(line => [line.tcin, line.item_number]);
@@ -524,13 +573,13 @@ export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false
           stripMoney,
         });
         card.receive.scanned_code = code;
-        return card;
+        return withCatalogStock(sb, storeId, ctx, line, card);
       }
     }
   }
   if (!found.line) return null;
   const ctx = await loadContext(sb, storeId, found.line);
-  return buildCostcoReceive({
+  const card = buildCostcoReceive({
     line: found.line,
     enrich: ctx.enrich,
     product: ctx.product,
@@ -539,6 +588,7 @@ export async function costcoReceiveLookup(sb, storeId, raw, { stripMoney = false
     costco: ctx.payload?.costco || null,
     stripMoney,
   });
+  return withCatalogStock(sb, storeId, ctx, found.line, card);
 }
 
 async function searchVariant(storeId, title, deps) {
