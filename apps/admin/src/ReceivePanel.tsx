@@ -1733,14 +1733,19 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     finally { setBusy(false); }
   }
 
-  async function addToExistingStock(match: StockMatch) {
+  async function addToExistingStock(match: StockMatch, locationCode?: string | null) {
     const quantity = Number(form.quantity);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Enter a valid quantity.'); return; }
+    const place = locationCode === undefined ? (selectedLocation || null) : (locationCode.trim() || null);
     setBusy(true); setError('');
     try {
-      const { data, error: e } = await client.rpc(match.is_stocked ? 'portal_stock_receive_add' : 'portal_stock_convert_and_add', { p_request: receiveRequest.current, p_sku: match.sku, p_quantity: quantity, p_location: selectedLocation || null });
+      const { data, error: e } = await client.rpc(match.is_stocked ? 'portal_stock_receive_add' : 'portal_stock_convert_and_add', { p_request: receiveRequest.current, p_sku: match.sku, p_quantity: quantity, p_location: place });
       if (e) throw e;
       receiveRequest.current = crypto.randomUUID();
+      if (place) {
+        setSelectedLocation(place);
+        try { localStorage.setItem(`floor:last-receive-location:${storeId}`, place); } catch { /* optional device preference */ }
+      }
       setSaved([match.sku]); setSelectedStockMatch(null); setStockMatches([]); setLast(null);
       resetEntry(undefined, false);
       setForm(prev => ({ ...prev, quantity: '1' }));
@@ -2327,7 +2332,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         onIdentify={file => identifyMissPhoto(file)}
         locations={receiveLocations} location={selectedLocation} setLocation={setSelectedLocation}
         stockMatches={stockMatches}
-        onAddToStock={sku => { const match = stockMatches.find(item => item.sku === sku); if (match) void addToExistingStock(match); }}
+        onAddToStock={(sku, locationCode) => { const match = stockMatches.find(item => item.sku === sku); if (match) void addToExistingStock(match, locationCode); }}
         addingToStock={busy}
         busy={busy} error={error || photoIdError}
         nextSku={options?.next_sku || ''}

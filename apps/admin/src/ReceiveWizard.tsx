@@ -56,7 +56,7 @@ export function ReceiveWizard({
   location: string;
   setLocation: (code: string) => void;
   stockMatches: Stock[];
-  onAddToStock: (sku: string) => void;
+  onAddToStock: (sku: string, locationCode: string) => void;
   addingToStock: boolean;
   busy: boolean;
   error: string;
@@ -81,6 +81,8 @@ export function ReceiveWizard({
   const [bay, setBay] = useState<number | null>(null);
   const [row, setRow] = useState<number | null>(null);
   const [noLocation, setNoLocation] = useState(false);
+  const [stockBayChosen, setStockBayChosen] = useState(false);
+  const wasStock = useRef(false);
   const seen = useRef<string | null>(null);
   const returnToReview = useRef(false);
 
@@ -140,7 +142,18 @@ export function ReceiveWizard({
   const rows = [...new Set(baySpots.map(item => item.row_no))].filter((value): value is number => value != null);
   const bins = baySpots.filter(item => item.row_no === row);
   const simpleBay = baySpots.length === 1;
+  useEffect(() => {
+    const entered = step === 'stock';
+    if (entered && !wasStock.current) {
+      setStockBayChosen(false);
+      setBay(null);
+      setRow(null);
+      setNoLocation(false);
+    }
+    wasStock.current = entered;
+  }, [step]);
   function pickBay(item: LocationChoice) {
+    setStockBayChosen(true);
     setNoLocation(false);
     setBay(item.bay_no ?? null);
     setRow(null);
@@ -148,6 +161,15 @@ export function ReceiveWizard({
     if (spots.length === 1) setLocation(spots[0].code);
     else setLocation('');
   }
+  function pickNoLocation() {
+    setStockBayChosen(true);
+    setNoLocation(true);
+    setBay(null);
+    setRow(null);
+    setLocation('');
+  }
+  const stockBayReady = stockBayChosen && (noLocation || Boolean(location));
+  const bayLabel = noLocation ? 'No location' : location ? locationMenuLabel(locations.find(item => item.code === location) || { code: location }) : 'Pick a bay';
 
   const retail = manifestRetailCents != null
     ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(manifestRetailCents / 100)
@@ -324,8 +346,36 @@ export function ReceiveWizard({
           <h2>You already have {stockMatches[0]?.quantity || 0} of these</h2>
           <p>{stockMatches[0]?.title} · SKU {stockMatches[0]?.sku}</p>
           <label>Add how many?<input inputMode="numeric" value={form.quantity} onChange={event => update('quantity', event.target.value)} /></label>
+          <div className="receive-step-main">
+            <p className="receive-step-label">Bay for these items</p>
+            <div className="receive-step-picks">
+              <button type="button" className={stockBayChosen && noLocation ? 'is-on' : ''} onClick={pickNoLocation}>No location</button>
+              {bays.map(item => (
+                <button type="button" key={item.bay_no} className={stockBayChosen && !noLocation && bay === item.bay_no ? 'is-on' : ''} onClick={() => pickBay(item)}>{item.bay_name || `Bay ${item.bay_no}`}</button>
+              ))}
+            </div>
+            {stockBayChosen && bay != null && !simpleBay && (
+              <>
+                <p className="receive-step-label">Row</p>
+                <div className="receive-step-picks">
+                  {rows.map(value => <button type="button" key={value} className={row === value ? 'is-on' : ''} onClick={() => { setStockBayChosen(true); setRow(value); setLocation(''); }}>R{value}</button>)}
+                </div>
+              </>
+            )}
+            {stockBayChosen && row != null && (
+              <>
+                <p className="receive-step-label">Bin</p>
+                <div className="receive-step-picks">
+                  {bins.map(item => (
+                    <button type="button" key={item.code} className={location === item.code ? 'is-on' : ''} onClick={() => { setStockBayChosen(true); setLocation(item.code); }}>{item.bin_no == null ? 'No bin' : `B${item.bin_no}`}</button>
+                  ))}
+                </div>
+              </>
+            )}
+            <p><strong>{stockBayChosen ? bayLabel : 'Pick a bay for these items'}</strong></p>
+          </div>
           <div className="receive-step-nav is-stack">
-            <button type="button" disabled={busy || addingToStock || !stockMatches[0]} onClick={() => stockMatches[0] && onAddToStock(stockMatches[0].sku)}>{addingToStock ? 'Adding…' : 'Add to stock'}</button>
+            <button type="button" disabled={busy || addingToStock || !stockMatches[0] || !stockBayReady} onClick={() => stockMatches[0] && onAddToStock(stockMatches[0].sku, noLocation ? '' : location)}>{addingToStock ? 'Adding…' : 'Add to stock'}</button>
             <button type="button" onClick={() => go(1)}>Receive as a separate item</button>
           </div>
         </div>
@@ -336,7 +386,7 @@ export function ReceiveWizard({
           <div className="receive-step-main">
             <p className="receive-step-label">Bay</p>
             <div className="receive-step-picks">
-              <button type="button" className={noLocation ? 'is-on' : ''} onClick={() => { setNoLocation(true); setBay(null); setRow(null); setLocation(''); }}>No location</button>
+              <button type="button" className={noLocation ? 'is-on' : ''} onClick={pickNoLocation}>No location</button>
               {bays.map(item => (
                 <button type="button" key={item.bay_no} className={!noLocation && bay === item.bay_no ? 'is-on' : ''} onClick={() => pickBay(item)}>{item.bay_name || `Bay ${item.bay_no}`}</button>
               ))}
@@ -359,7 +409,7 @@ export function ReceiveWizard({
                 </div>
               </>
             )}
-            <p><strong>{noLocation ? 'No location' : location ? locationMenuLabel(locations.find(item => item.code === location) || { code: location }) : 'Pick a bay'}</strong></p>
+            <p><strong>{bayLabel}</strong></p>
           </div>
           <div className="receive-step-nav">
             <button type="button" onClick={() => go(-1)}>Back</button>
