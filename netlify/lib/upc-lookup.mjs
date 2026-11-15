@@ -565,6 +565,21 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
     preserveContradictedSave = savedCatalogContradicts(owned, cachedHit?.payload);
     if (!preserveContradictedSave && owned && (owned.brand || owned.model || owned.title)) {
       const merged = productToMerged(owned);
+      if (!merged.images?.length && !cachedHit?.payload?.stock_photo_checked) {
+        try {
+          const { catalogStockPhotos, stockPhotoSearchTimed } = await import("./receive-stock-photos.mjs");
+          const foundPhotos = await stockPhotoSearchTimed(catalogStockPhotos(storeId, { brand: merged.brand, title: merged.title }));
+          const images = foundPhotos.images || [];
+          if (images.length) {
+            merged.images = images;
+            await sb.from("floor_products").update({ images, updated_at: new Date().toISOString() }).eq("gtin14", gtin.gtin14);
+          } else if (!foundPhotos.timedOut && cachedHit?.payload) {
+            await sb.from("upc_lookup_cache").update({
+              payload: { ...cachedHit.payload, stock_photo_checked: true },
+            }).eq("gtin14", gtin.gtin14);
+          }
+        } catch { /* a product with no catalog photo still receives */ }
+      }
       return {
         gtin: gtinOut,
         cached: false,

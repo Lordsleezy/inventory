@@ -1328,7 +1328,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     setLoadedId(current.id);
     activeScan.current = current.id;
     const scanId = current.id;
-    if (!r?.store_label && !r?.receive?.internal && m?.images?.[0]) void stageStockPhoto(String(m.images[0]), current.upc, scanId);
+    const stockUrl = String(r?.stock_photos?.find(photo => photo?.url)?.url || m?.images?.[0] || '');
+    if (!r?.store_label && !r?.receive?.internal && stockUrl) void stageStockPhoto(stockUrl, current.upc, scanId);
     const missingBox = [initial.length, initial.width, initial.height, initial.weight].some(v => !v);
     const missingProduct = [initial.productHeight, initial.productWidth, initial.productDepth, initial.productWeight].some(v => !v);
     if (!r?.store_label && !isTrueCatalogMiss(r) && (appChrome ? missingProduct : missingBox || (!prewarmed && missingProduct)))
@@ -1504,8 +1505,9 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     const quantity = Number(form.quantity);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
     let acceptedStockPhotoPath = doNotList ? '' : stockPhotoPath;
-    if (!doNotList && !acceptedStockPhotoPath && !manual && merged?.images?.[0] && current?.upc) {
-      acceptedStockPhotoPath = await stageStockPhoto(String(merged.images[0]), current.upc, current.id) || '';
+    const stockUrl = String(current?.result?.stock_photos?.find(photo => photo?.url)?.url || merged?.images?.[0] || '');
+    if (!doNotList && !acceptedStockPhotoPath && !manual && stockUrl && current?.upc) {
+      acceptedStockPhotoPath = await stageStockPhoto(stockUrl, current.upc, current.id) || '';
     }
     if (photoBusy && files.length) { setError('Wait for the unit photo to finish uploading.'); return; }
     if (files.some(file => (file.type && !file.type.startsWith('image/')) || file.size > PHOTO_MAX_BYTES)) {

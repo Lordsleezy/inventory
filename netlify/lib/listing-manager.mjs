@@ -16,7 +16,7 @@ import {
   listAmazonOffer,
 } from "./amazon.mjs";
 import { createAmazonCatalogListing } from "./amazon-create.mjs";
-import { amazonImageLocatorPatches, tiktokMainImagePayload } from "./listing-image-payloads.mjs";
+import { amazonImageLocatorPatches, stockFirstRows, tiktokMainImagePayload } from "./listing-image-payloads.mjs";
 import { ebayFetch, listEbayAccounts, loadEbayAccount, listSku, withdrawSku, photoUrls } from "./ebay.mjs";
 import { resolveEbayAccount, userTokenForAccount } from "./ebay-accounts.mjs";
 import { getMyEbaySellingActive, getSellerListActive, reviseTradingFixedPrice } from "./ebay-trading.mjs";
@@ -94,11 +94,10 @@ async function unitPhotos(storeId, sku) {
   const sb = serviceClient();
   const { data } = await sb
     .from("photos")
-    .select("path, is_primary")
+    .select("path, source, sort_order, is_primary")
     .eq("store_id", storeId)
-    .eq("sku", sku)
-    .order("is_primary", { ascending: false });
-  const paths = (data || [])
+    .eq("sku", sku);
+  const paths = stockFirstRows(data)
     .map((r) => r.path)
     .filter((p) => p && !String(p).includes("/official-") && !/ai[-_]?gen/i.test(String(p)));
   if (!paths.length) {

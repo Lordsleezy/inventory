@@ -30,6 +30,7 @@ const receiveModel = () => process.env.GEMINI_RECEIVE_MODEL || 'gemini-3.5-flash
 const retailModel = () => process.env.GEMINI_RETAIL_MODEL || 'gemini-3.1-flash-lite-preview';
 const STOCK_IMAGE_HOSTS = ['media-amazon.com', 'ssl-images-amazon.com', 'ebayimg.com', 'upcitemdb.com',
   'salsify.com', 'walmartimages.com', 'target.com', 'bestbuy.com', 'homedepot.com', 'lowes.com', 'costco.com',
+  'costco-static.com', 'bbystatic.com', 'thdstatic.com',
   'walmart.com', 'amazon.com', 'amazonaws.com', 'scene7.com', 'kohls.com', 'macys.com', 'wayfair.com',
   'kohler.com', 'hasbro.com', 'mattel.com', 'lg.com', 'samsung.com', 'ninja.com', 'cuisinart.com'];
 const riskyImageText = /(?:watermark|collage|infographic|dimension(?:s)?|comparison|price|sticker|coupon|sale|logo|icon|banner|swatch|size.?chart)/i;
@@ -70,11 +71,21 @@ async function downloadStockImage(url) {
 }
 
 function catalogPhotoUrls(product, payload) {
-  return new Set([
+  return [
     ...(product?.images || []), ...(payload?.stock_photos || []).map(row => row?.url),
     ...(payload?.merged?.images || []), ...(payload?.amazon?.images || []),
     ...(payload?.upcitemdb?.images || []), ...(payload?.ebay_catalog?.imageUrls || []),
-  ].filter(Boolean));
+  ].filter(Boolean);
+}
+
+function sameCatalogPhoto(stored, photoUrl) {
+  if (stored === photoUrl.href) return true;
+  try {
+    const saved = new URL(stored);
+    return saved.protocol === photoUrl.protocol && saved.host === photoUrl.host && saved.pathname === photoUrl.pathname;
+  } catch {
+    return false;
+  }
 }
 
 function specificsFromIdentity(identity) {
@@ -187,10 +198,10 @@ export async function invoke(event) {
       ctx.sb.from('upc_lookup_cache').select('payload').eq('gtin14', gtin.gtin14).maybeSingle(),
     ]);
     const payload = cached.data?.payload || {};
-    if (!catalogPhotoUrls(product.data, payload).has(photoUrl.href))
-      return json(403, { ok: false, error: 'catalog_photo_mismatch' });
+    const storedUrl = catalogPhotoUrls(product.data, payload).find(url => sameCatalogPhoto(url, photoUrl));
+    if (!storedUrl) return json(403, { ok: false, error: 'catalog_photo_mismatch' });
     try {
-      const image = await downloadStockImage(photoUrl.href);
+      const image = await downloadStockImage(storedUrl);
       const path = `${ctx.storeId}/receive/${ctx.userId}/${requestId}/stock-${randomUUID()}.${image.ext}`;
       const { error } = await ctx.sb.storage.from('unit-photos').upload(path, image.bytes,
         { contentType: image.mime, upsert: false });
@@ -214,7 +225,11 @@ export async function invoke(event) {
     ]);
     const permitted = catalogPhotoUrls(product, cached?.payload || {});
     const requested = Array.isArray(body.photos) ? body.photos.slice(0, 6) : [];
-    if (!requested.length || requested.some(row => !permitted.has(String(row?.url || ''))))
+    const listed = (url) => {
+      try { return permitted.some((saved) => sameCatalogPhoto(saved, new URL(String(url || "")))); }
+      catch { return false; }
+    };
+    if (!requested.length || requested.some(row => !listed(row?.url)))
       return json(403, { ok: false, error: 'catalog_photo_mismatch' });
     const firstPath = String(body.first_path || '');
     const { data: first } = await ctx.sb.from('photos').select('id,sku,path,source,sort_order')
