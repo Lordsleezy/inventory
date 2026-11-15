@@ -356,7 +356,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
             </ol>
             {isAdmin && orderHasClearableLabel(order) && (
               <button type="button" className="app-order-text-back" disabled={!!busy} onClick={onStepBack}>
-                Move back to Needs label
+                {orderStepBackActionLabel(order)}
               </button>
             )}
           </section>
