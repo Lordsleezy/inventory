@@ -279,12 +279,28 @@ const rest = all.filter((f) => f.name > "0005_private_photos.sql");
     'giveaway and defective pull keep source location allocations in sync');
   assert.equal((await db.query(`select coalesce(sum(quantity),0)::int quantity from public.unit_location_stock where store_id=$1 and sku=$2 and location_code='1-1'`, [storeId,defectiveSku])).rows[0].quantity, 0,
     'defective pull assigns the moved unit to its new SKU at the same location');
+  const { rows: adminTitleRows } = await db.query(
+    `select public.receive_commit($1,$2,ARRAY[]::text[],$3) as result`,
+    ['00000000-0000-4000-8000-000000000602', JSON.stringify({ ...nfsFields, p_brand: '' }), JSON.stringify(nfsExtras)],
+  );
+  const adminTitleSku = adminTitleRows[0].result.skus[0];
+  const { rows: adminTitleUnit } = await db.query(
+    `select condition, listing_specs->>'do_not_list' as do_not_list, show_on_website,
+            public.unit_listing_gaps(u) as gaps
+       from public.units u where store_id = $1 and sku = $2`, [storeId, adminTitleSku],
+  );
+  assert.deepEqual(adminTitleUnit[0], {
+    condition: 'Defective/non-sellable',
+    do_not_list: 'true',
+    show_on_website: false,
+    gaps: [],
+  }, "admin not-for-sale with only a title is defective and hidden");
   await assert.rejects(
     db.query(`select public.receive_commit($1,$2,ARRAY[]::text[],$3)`, [
-      '00000000-0000-4000-8000-000000000602', JSON.stringify({ ...nfsFields, p_brand: '' }), JSON.stringify(nfsExtras),
+      '00000000-0000-4000-8000-000000000609', JSON.stringify({ ...nfsFields, p_brand: '', p_title: '  ' }), JSON.stringify(nfsExtras),
     ]),
-    /Brand required/,
-    "admin not-for-sale commit rejects a missing brand",
+    /Title required/,
+    "admin not-for-sale commit rejects a missing title when there is no brand",
   );
   const clerkId = '00000000-0000-4000-8000-000000000502';
   await db.query(`insert into auth.users(id) values($1)`, [clerkId]);
