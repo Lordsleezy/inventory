@@ -251,7 +251,9 @@ html.app-mode .app-order-upload-v2 input {
 }
 
 /* --- Detail --- */
-html.app-mode .app-tab-panel > .app-stack.app-order-detail-stack {
+/* Pull-refresh wraps children in .app-pull-sheet; match both layouts. */
+html.app-mode .app-tab-panel > .app-stack.app-order-detail-stack,
+html.app-mode .app-tab-panel > .app-pull-sheet > .app-stack.app-order-detail-stack {
   position: absolute;
   inset: 0;
   display: flex;
@@ -603,7 +605,8 @@ html.app-mode .app-order-dock {
   border-top: 1px solid #2a2a2a;
 }
 
-html.app-mode .app-tab-panel > .app-stack.app-order-detail-stack .app-order-dock {
+html.app-mode .app-tab-panel > .app-stack.app-order-detail-stack .app-order-dock,
+html.app-mode .app-tab-panel > .app-pull-sheet > .app-stack.app-order-detail-stack .app-order-dock {
   padding-bottom: calc(12px + 56px + env(safe-area-inset-bottom, 0px));
 }
 
@@ -649,7 +652,7 @@ html.app-mode .app-order-row:not(.app-order-row-v2) .app-order-main > strong:fir
 
 /* --- Order detail v2 (phone only) --- */
 html.app-mode .app-order-detail-v2 .app-order-detail-scroll {
-  padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: 24px;
 }
 
 html.app-mode .app-order-hero-v2 {
@@ -936,21 +939,20 @@ html.app-mode .app-order-text-back {
 }
 
 html.app-mode .app-order-dock-v2 {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  flex: 0 0 auto;
   z-index: 6;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+  padding: 10px 16px calc(10px + 56px + env(safe-area-inset-bottom, 0px));
   background: #000;
   border-top: 1px solid #2a2a2a;
 }
 
-html.app-mode .app-tab-panel > .app-stack.app-order-detail-stack.app-order-detail-v2 {
+html.app-mode .app-tab-panel > .app-stack.app-order-detail-stack.app-order-detail-v2,
+html.app-mode .app-tab-panel > .app-pull-sheet > .app-stack.app-order-detail-stack.app-order-detail-v2 {
   padding-bottom: 0;
 }
 

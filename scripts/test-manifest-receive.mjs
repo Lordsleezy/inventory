@@ -131,21 +131,9 @@ async function reachPrice(page) {
   assert.ok(nav && nav.y > 640, 'Back and Next sit at the bottom');
   await page.locator('input[type="file"]').first().setInputFiles({ name: 'item.jpg', mimeType: 'image/jpeg', buffer: Buffer.alloc(4096, 1) });
   await page.getByRole('button', { name: 'Next' }).click();
-  // Category/specifics may appear until eBay fields hydrate; skip when already ready.
-  const categoryHeading = page.getByRole('heading', { name: /^(Category|Item specifics)/ });
-  const condition = page.getByRole('radio', { name: 'New' });
-  await Promise.race([
-    categoryHeading.waitFor({ state: 'visible' }),
-    condition.waitFor({ state: 'visible' }),
-  ]);
-  if (await categoryHeading.isVisible().catch(() => false)) {
-    const next = page.getByRole('button', { name: 'Next' });
-    if (await next.isDisabled()) {
-      const pick = page.locator('.rcv-cat').first();
-      if (await pick.count()) await pick.click();
-    }
-    await next.click({ timeout: 30000 });
-  }
+  // New/Open box with a manifest retail skips the price screen — use Used so price stays reachable.
+  const condition = page.getByRole('radio', { name: 'Used · Good' });
+  await condition.waitFor({ state: 'visible' });
   await condition.check();
   await pinned(page);
   await page.getByRole('button', { name: 'Next' }).click();
