@@ -19,6 +19,7 @@ import { formatEbayError, locationKey } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
+import { ebayListingTitle } from "./ebay-title.mjs";
 import { appendClearanceFooter } from "./ebay-listing-standards.mjs";
 import { assertEbayListable } from "./ebay-exclusion.mjs";
 import { ebayInventoryQuantityBody, ebayOfferQuantityBody, orderLineQty, saleLeavesStock } from "./channel-qty-sync.mjs";
@@ -702,14 +703,7 @@ function packageSize(unit) {
 }
 
 function listingCopy(unit) {
-  const bundled = unit.listing_specs?.bundle_role === 'parent';
-  const name = bundled
-    ? unit.title
-    : [unit.brand, unit.model].filter((p) => String(p || "").trim()).join(" ").trim() || unit.title || `SKU ${unit.sku}`;
-  const titleBits = bundled ? [name] : [name, unit.condition, unit.category].filter((p) => p && String(p).trim());
-  let title = titleBits.join(" — ");
-  title += ` | SKU ${unit.sku}`;
-  if (title.length > 80) title = title.slice(0, 77) + "...";
+  const title = ebayListingTitle(unit);
   const description = composeChannelDescription({
     listingBody: unit.listing_body,
     brand: unit.brand,

@@ -52,12 +52,8 @@ export function photoFileName(sku: string, indexFromOne: number): string {
 }
 
 export function listingTitle(unit: ExportUnit): string {
-  const name = [unit.brand, unit.model].filter((p) => String(p).trim()).join(" ").trim() || unit.title.trim() || `SKU ${unit.sku}`;
-  const bits = [unit.condition, unit.category].filter((p) => p && String(p).trim());
-  let title = name;
-  if (bits.length) title += ` — ${bits.join(" · ")}`;
-  title += ` | SKU ${unit.sku}`;
-  return title;
+  const name = [unit.brand, unit.model].filter((p) => String(p).trim()).join(" ").trim() || unit.title.trim() || "Item";
+  return name.length > 80 ? `${name.slice(0, 77).trimEnd()}...` : name;
 }
 
 export function listingDescription(unit: ExportUnit): string {

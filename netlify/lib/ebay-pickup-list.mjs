@@ -12,6 +12,7 @@ import { policiesForLocalPickup, POLICY_NAMES } from "./ebay-policies.mjs";
 import { listSku } from "./ebay.mjs";
 import { hoursText, STORE_ADDRESS, STORE_PHONE } from "./web-order-email.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
+import { ebayListingTitle } from "./ebay-title.mjs";
 import { ebayDescription, ebayIdentifiers } from "./ebay-product.mjs";
 import { ebayItemViewUrl } from "./ebay-env.mjs";
 import { floorLog } from "./floor-log.mjs";
@@ -75,19 +76,7 @@ export function pickupListPriceCents(askCents, { costCents = STORE_COST_CENTS, f
 }
 
 function titleForUnit(unit) {
-  if (unit.ebay_title && String(unit.ebay_title).trim()) {
-    let t = String(unit.ebay_title).trim();
-    if (!/\bSKU\b/i.test(t)) t = `${t} | SKU ${unit.sku}`;
-    return t.length > 80 ? `${t.slice(0, 77)}...` : t;
-  }
-  const name =
-    [unit.brand, unit.model].filter((p) => String(p || "").trim()).join(" ").trim() ||
-    unit.title ||
-    `SKU ${unit.sku}`;
-  const bits = [name, unit.condition].filter((p) => p && String(p).trim());
-  let title = `${bits.join(" — ")} | SKU ${unit.sku}`;
-  if (title.length > 80) title = `${title.slice(0, 77)}...`;
-  return title;
+  return ebayListingTitle(unit);
 }
 
 function pickupDescription(unit, hours) {

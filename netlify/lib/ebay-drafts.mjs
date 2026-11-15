@@ -6,6 +6,7 @@ import { ebayFailureLabel, formatEbayError } from "./ebay-errors.mjs";
 import { publicPhotoUrl } from "./ebay-photos.mjs";
 import { composeChannelDescription, parseListingSpecs } from "./listing-copy.mjs";
 import { ebayDescription } from "./ebay-product.mjs";
+import { clipEbayTitle as clipTitle, ebayListingTitle } from "./ebay-title.mjs";
 import { gtinIssue } from "./gtin.mjs";
 import { fillAspects, pickCategorySuggestion, rankCategorySuggestions } from "./ebay-aspects.mjs";
 import {
@@ -104,11 +105,6 @@ function boxKey(box) {
   return `${box.length_in}x${box.width_in}x${box.height_in}@${box.weight_lb}`;
 }
 
-function clipTitle(value) {
-  const title = String(value || "").replace(/\s+/g, " ").trim();
-  return title.length > 80 ? title.slice(0, 77).trimEnd() + "..." : title;
-}
-
 function aspectMap(unit) {
   const specs = parseListingSpecs(unit?.listing_specs) || {};
   const fromSpecs = specs.ebay_aspects && typeof specs.ebay_aspects === "object" ? specs.ebay_aspects : {};
@@ -127,9 +123,7 @@ function locked(draft, field) {
 }
 
 function autoTitle(unit) {
-  if (unit.ebay_title) return clipTitle(unit.ebay_title);
-  const name = [unit.brand, unit.model].filter((p) => String(p || "").trim()).join(" ").trim() || unit.title || `SKU ${unit.sku}`;
-  return clipTitle([name, unit.condition].filter(Boolean).join(" — "));
+  return ebayListingTitle(unit);
 }
 
 function autoDescription(unit) {
