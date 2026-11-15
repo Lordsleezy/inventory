@@ -193,8 +193,8 @@ type Props = {
   /** Phone-only presentation for the Android Chrome-installed clerk app. */
   storePhoneMode?: boolean;
   initialManual?: boolean;
-  /** Phone Receive home: scan, identify from a photo, or enter details with no barcode. */
-  initialEntry?: 'scan' | 'identify' | 'manual';
+  /** Phone Receive home: barcode scan, Gemini photo, or a title-only defective save. */
+  initialEntry?: 'scan' | 'identify' | 'defective';
   /** Prefill / enqueue a UPC from an earlier camera capture. */
   initialUpc?: string | null;
   onAppCancel?: () => void;
@@ -643,17 +643,17 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const [stockPhotoBusy, setStockPhotoBusy] = useState(false);
   const [stockPhotoError, setStockPhotoError] = useState('');
   const [stockPhotoBroken, setStockPhotoBroken] = useState(false);
-  const [manual, setManual] = useState(!!initialManual || initialEntry === 'manual');
+  const [manual, setManual] = useState(!!initialManual);
   const [draft, setDraft] = useState('');
   const [queue, setQueue] = useState<Scan[]>([]);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [form, setForm] = useState<Form>(() => (
-    initialEntry === 'manual' || initialManual ? { ...blank, noUpc: true, upc: '' } : blank
+    initialManual ? { ...blank, noUpc: true, upc: '' } : blank
   ));
   useEffect(() => {
-    if (initialEntry !== 'manual' && !initialManual) return;
+    if (!initialManual) return;
     setForm(prev => (prev.noUpc ? prev : { ...prev, noUpc: true, upc: '' }));
-  }, [initialEntry, initialManual]);
+  }, [initialManual]);
   const [files, setFiles] = useState<File[]>([]);
   const [saved, setSaved] = useState<string[]>([]);
   const [savedNotice, setSavedNotice] = useState('');
@@ -1495,6 +1495,45 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   const liveMissing = missingFor(parse() || { ask: null, cost: null, dims: [null, null, null, null] });
   const formValid = liveMissing.length === 0 && (titleOnlyReceive || channelMissing === 0);
 
+  /** Title only. Saves as do not list and defective, then returns the new SKU. */
+  async function saveDefectiveTitle(title: string) {
+    const trimmed = title.trim();
+    if (!trimmed) throw new Error('Type a title.');
+    setBusy(true);
+    setError('');
+    try {
+      const data = await commitReceive(client, storeId, {
+        p_request: receiveRequest.current,
+        p_fields: {
+          p_quantity: 1, p_brand: '', p_model: '', p_title: trimmed, p_category: null, p_description: null,
+          p_condition: SCRATCH, p_test_status: null, p_ask_cents: null, p_cost_cents: null, p_notes: null,
+          p_upc: null, p_shippable: 'auto', p_length: null, p_width: null, p_height: null, p_weight: null,
+        },
+        p_photos: [],
+        p_extras: {
+          location: null, manifest: null, dns: false, do_not_list: true, defective: true, channels: [],
+          enrichment: { specs: { do_not_list: true }, show: false, brand: '', model: '', title: trimmed, description: '' },
+          stock_photo_paths: [], ebay_category_id: null, ebay_attributes: {}, ebay_condition_id: null,
+          photo_identity_confirmed: false, photo_identity_type: '',
+        },
+      });
+      const sku = String(data.skus?.[0] || '');
+      if (!sku) throw new Error('Saved, but no SKU came back. Check Receive before trying again.');
+      receiveRequest.current = crypto.randomUUID();
+      setSaved([sku]);
+      setSavedNotice(sku);
+      onSaved();
+      void loadOptions().catch(() => {});
+      return sku;
+    } catch (e) {
+      const message = errText(e);
+      setError(message);
+      throw new Error(message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   /* ----- finish ----- */
   async function finish(event?: React.FormEvent, ackDup = false) {
     saveTappedAt.current = performance.now();
@@ -2236,8 +2275,8 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         miss={isTrueCatalogMiss(result)} title={foundTitle} brand={foundBrand}
         details={[result?.receive?.item_number, text(result?.merged?.category)].filter(Boolean).join(' · ')}
         source={result?.receive?.suggested ? `Possible match · manifest ${lot || 'TRA-7096264'}` : (result?.receive?.item_number ? `Found by UPC · manifest ${lot || 'TRA-7096264'}` : 'Found by UPC')}
-        entry={initialEntry === 'identify' ? 'identify' : initialEntry === 'manual' ? 'manual' : 'scan'}
-        holdForLookup={Boolean(initialUpc) && initialEntry !== 'identify' && initialEntry !== 'manual'}
+        entry={initialEntry === 'identify' ? 'identify' : initialEntry === 'defective' ? 'defective' : 'scan'}
+        holdForLookup={Boolean(initialUpc) && initialEntry !== 'identify' && initialEntry !== 'defective'}
         stockUrl={stockPhotoUrls[0]?.url || ''}
         onWrongPhoto={() => {
           const url = stockPhotoUrls[0]?.url;
@@ -2293,6 +2332,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
         upc={form.noUpc ? 'No UPC' : (form.upc || current?.upc || '')}
         savedNotice={savedNotice}
         onSave={() => { void finish(undefined, true); }}
+        onSaveDefective={saveDefectiveTitle}
         onCancel={() => onAppCancel?.()}
         onClear={() => { setQueue([]); setPhotoCandidate(null); setFiles([]); setError(''); }}
         onScan={code => { setError(''); enqueue(code); }}

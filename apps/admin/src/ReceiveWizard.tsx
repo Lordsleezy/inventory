@@ -28,7 +28,7 @@ export function ReceiveWizard({
   hasPhoto, photoPreviews = [], onPhoto, onIdentify,
   locations, location, setLocation,
   stockMatches, onAddToStock, addingToStock,
-  busy, error, onSave, onCancel, onClear, onScan, onReject, onAccept,
+  busy, error, onSave, onSaveDefective, onCancel, onClear, onScan, onReject, onAccept,
   nextSku = '', upc = '', savedNotice = '',
   entry = 'scan', holdForLookup = false,
 }: {
@@ -61,20 +61,23 @@ export function ReceiveWizard({
   busy: boolean;
   error: string;
   onSave: () => void;
+  onSaveDefective?: (title: string) => Promise<string>;
   onCancel: () => void;
   onClear: () => void;
   onScan: (code: string) => void;
   onReject: () => void;
   onAccept: () => void | Promise<void>;
-  entry?: 'scan' | 'identify' | 'manual';
+  entry?: 'scan' | 'identify' | 'defective';
   holdForLookup?: boolean;
   nextSku?: string;
   upc?: string;
   savedNotice?: string;
 }) {
-  const [step, setStep] = useState<ReceiveStepId | 'scan' | 'lookup' | 'identify'>(
-    entry === 'identify' ? 'identify' : entry === 'manual' ? 'brand' : (holdForLookup ? 'lookup' : 'scan'),
+  const [step, setStep] = useState<ReceiveStepId | 'scan' | 'lookup' | 'identify' | 'defective'>(
+    entry === 'identify' ? 'identify' : entry === 'defective' ? 'defective' : (holdForLookup ? 'lookup' : 'scan'),
   );
+  const [defectiveTitle, setDefectiveTitle] = useState('');
+  const [defectiveSku, setDefectiveSku] = useState('');
   const [bay, setBay] = useState<number | null>(null);
   const [row, setRow] = useState<number | null>(null);
   const [noLocation, setNoLocation] = useState(false);
@@ -91,8 +94,7 @@ export function ReceiveWizard({
     hasDims: [form.productDepth, form.productWidth, form.productHeight, form.productWeight].every(value => Number(value) > 0),
     hasStockMatch: stockMatches.length > 0,
     manifestPrice: usesManifestPrice,
-    noBarcode: entry === 'manual',
-  }), [doNotList, form, stockMatches.length, usesManifestPrice, entry]);
+  }), [doNotList, form, stockMatches.length, usesManifestPrice]);
 
   useEffect(() => {
     document.body.classList.add('receive-steps-open');
@@ -100,10 +102,11 @@ export function ReceiveWizard({
   }, []);
 
   useEffect(() => {
+    if (step === 'defective') return;
     if (!lookupId) {
       seen.current = null;
       if (entry === 'identify') setStep('identify');
-      else if (entry === 'manual') setStep(current => (current === 'scan' || current === 'identify' || current === 'lookup' ? 'brand' : current));
+      else if (entry === 'defective') setStep('defective');
       else if (!holdForLookup) setStep('scan');
       return;
     }
@@ -111,7 +114,7 @@ export function ReceiveWizard({
     if (seen.current === lookupId) return;
     seen.current = lookupId;
     setStep(miss && !title ? 'identify' : 'confirm');
-  }, [lookupId, lookupStatus, miss, title, entry, holdForLookup]);
+  }, [lookupId, lookupStatus, miss, title, entry, holdForLookup, step]);
 
   function edit(next: ReceiveStepId) {
     returnToReview.current = true;
@@ -125,7 +128,6 @@ export function ReceiveWizard({
       return;
     }
     if (step === 'confirm' && delta < 0) { onClear(); return; }
-    if (entry === 'manual' && delta < 0 && step === plan[0]) { onCancel(); return; }
     if (delta > 0 && step === 'brand' && !form.brand.trim()) return;
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
     if (delta > 0 && step === 'dims' && ![form.productDepth, form.productWidth, form.productHeight, form.productWeight].every(value => Number(value) > 0)) return;
@@ -167,9 +169,39 @@ export function ReceiveWizard({
   const reference = <ManifestReceiveReference result={manifestReference} />;
   if (step === 'scan') return <ReceiveBarcodeScanner onClose={onCancel} onDetect={onScan} />;
   if (step === 'identify') {
-    return <ReceiveBarcodeScanner mode="photo" banner={<>{reference}{error && <p className="receive-scanner-error" role="alert">{error}</p>}</>} onClose={onCancel} onDetect={() => undefined} onPhoto={file => {
+    return <ReceiveBarcodeScanner mode="photo" banner={<>{reference}{error && <p className="receive-scanner-error" role="alert">{error}</p>}</>} onClose={onCancel} onDetect={() => undefined} onDefective={() => setStep('defective')} onPhoto={file => {
       void Promise.resolve(onIdentify(file)).then(() => setStep('confirm')).catch(() => undefined);
     }} />;
+  }
+  if (step === 'defective') {
+    return (
+      <div className="receive-steps">
+        <div className="receive-step-top">
+          <button type="button" onClick={onCancel}>Cancel</button>
+          <strong>Defective</strong>
+          <span />
+        </div>
+        {error && <p className="receive-step-error" role="alert">{error}</p>}
+        <div className="receive-step">
+          <h2>Title</h2>
+          <p>Type a title. This saves as do not list and gives you a SKU.</p>
+          {defectiveSku ? (
+            <>
+              <p className="receive-review-sku" role="status"><span>SKU</span><strong>{defectiveSku}</strong></p>
+              <p>Saved as do not list.</p>
+              <button type="button" onClick={onCancel}>Done</button>
+            </>
+          ) : (
+            <>
+              <input value={defectiveTitle} placeholder="What is it?" autoFocus onChange={event => setDefectiveTitle(event.target.value)} />
+              <button type="button" disabled={busy || !defectiveTitle.trim()} onClick={() => {
+                void onSaveDefective?.(defectiveTitle.trim()).then(sku => { if (sku) setDefectiveSku(sku); }).catch(() => undefined);
+              }}>{busy ? 'Saving…' : 'Save'}</button>
+            </>
+          )}
+        </div>
+      </div>
+    );
   }
 
   return (

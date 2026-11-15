@@ -46,14 +46,18 @@ test('a used unit still asks for a price when the manifest has one', () => {
   }), ['confirm', 'photo', 'condition', 'price', 'location', 'review']);
 });
 
-test('no barcode asks for the details before the camera', async () => {
-  assert.deepEqual(receiveStepPlan({
-    doNotList: false, brand: '', title: '',
-    hasDims: false, hasStockMatch: false, noBarcode: true,
-  }), ['brand', 'title', 'condition', 'price', 'dims', 'photo', 'location', 'review']);
+test('no barcode opens the Gemini camera, and Defective is the title-only save', async () => {
   const home = await readFile(new URL('./appMode/AppReceive.tsx', import.meta.url), 'utf8');
-  assert.match(home, /setEntry\('manual'\); openForm\(true\)/);
-  assert.doesNotMatch(home, /setEntry\('identify'\)/);
+  assert.match(home, /setPendingUpc\(null\); setEntry\('identify'\); openForm\(false\); \}\}>No barcode<\/button>/);
+  assert.match(home, /setEntry\('defective'\); openForm\(false\); \}\}>Defective<\/button>/);
+  const scanner = await readFile(new URL('./ReceiveBarcodeScanner.tsx', import.meta.url), 'utf8');
+  assert.match(scanner, /mode === 'photo' && onDefective/);
+  assert.match(scanner, />Defective</);
+  const wizard = await readFile(new URL('./ReceiveWizard.tsx', import.meta.url), 'utf8');
+  assert.match(wizard, /onSaveDefective\?\.\(defectiveTitle\.trim\(\)\)/);
+  const panel = await readFile(new URL('./ReceivePanel.tsx', import.meta.url), 'utf8');
+  assert.match(panel, /do_not_list: true, defective: true/);
+  assert.match(panel, /p_condition: SCRATCH/);
 });
 
 test('eBay category and specifics never get a Receive screen', () => {
