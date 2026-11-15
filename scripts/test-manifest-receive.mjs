@@ -33,6 +33,7 @@ const { outputFiles } = await build({
         if (name === 'receive_group_lookup') return { data: scenario.groups || [] };
         if (name === 'portal_receive_stock_match') return { data: scenario.stockMatches || [], error: null };
         if (name === 'portal_receive_options' || name === 'staff_receive_options') return { data: { next_sku: '10001', categories: ['Home'], conditions: ['New'], test_statuses: ['untested'] } };
+        if (name === 'portal_bay_list') return { data: { locations: [{ code: '1-1', bay_no: 1, row_no: 1, bin_no: null, bay_name: 'Bay 1' }] }, error: null };
         if (name === 'portal_ebay_category_form') {
           return { data: {
             path: 'Home > Lamps',
@@ -200,8 +201,10 @@ try {
   await pinned(repeat);
   await repeat.getByRole('button', { name: 'Next' }).click();
   await pinned(repeat);
+  await repeat.getByText('Pick a bay for these items').waitFor();
+  await repeat.getByRole('button', { name: 'Bay 1' }).click();
   await repeat.getByRole('button', { name: 'Add to stock' }).click();
-  await repeat.waitForFunction(() => window.__calls.some(call => call.name === 'portal_stock_receive_add' && call.args?.p_sku === '11500' && call.args?.p_quantity === 1));
+  await repeat.waitForFunction(() => window.__calls.some(call => call.name === 'portal_stock_receive_add' && call.args?.p_sku === '11500' && call.args?.p_quantity === 1 && call.args?.p_location === '1-1'));
   assert.equal(await repeat.locator('input[placeholder="Leave blank if unknown"]').count(), 0, 'stock reuse cannot expose clerk cost');
   console.log('PASS: manifest retail, no-match, catalog miss → photo prompt, all fields isolated, SALVAGE/mixed warnings, manual price, slow/failing sidecar.');
   for (const isStaff of [false, true]) {
