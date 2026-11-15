@@ -14,7 +14,7 @@ import type { Customer, TicketQuote, TicketSummary } from '@floor/cloud';
 import { cardFeeCents } from '@floor/cloud';
 import type { CartLine } from './cart';
 import type { RegisterUnit } from './units';
-import { unitThumbUrl } from './units';
+import { denyOnlineOrderReserved, unitThumbUrl } from './units';
 import type { ReceiptPayload } from './sale';
 import { downloadReceiptText, printReceiptHtml, receiptHtml } from './sale';
 import { formatPoints } from './CustomerAttach';
@@ -192,6 +192,12 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
       }
       setQ(code);
       setShowHits(true);
+      if (await denyOnlineOrderReserved(code)) {
+        setQ('');
+        setShowHits(false);
+        searchRef.current?.focus();
+        return;
+      }
       const rows = await queryUnit(code);
       if (rows[0]) addFromSearch(rows[0]);
     } finally {
@@ -213,12 +219,14 @@ export function NativeRegisterCart(props: NativeRegisterProps) {
     }
     setCustomBusy(true);
     try {
+      if (await denyOnlineOrderReserved(term)) return;
       const rows = await queryUnit(term);
       const unit = rows[0];
       if (!unit) {
         setCustomError('No available inventory match. Custom lines must be real SKUs.');
         return;
       }
+      if (await denyOnlineOrderReserved(unit.sku)) return;
       onCustomUnit(unit, price);
       setCustomOpen(false);
       setCustomTitle('');

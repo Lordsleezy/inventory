@@ -32,7 +32,13 @@ import {
   type ReceiptPayload,
   type SalePhase,
 } from './register/sale';
-import { loadAvailableUnits, queryAvailableUnits, searchUnits, type RegisterUnit } from './register/units';
+import {
+  denyOnlineOrderReserved,
+  loadAvailableUnits,
+  queryAvailableUnits,
+  searchUnits,
+  type RegisterUnit,
+} from './register/units';
 import { NativePaySheets, NativeRegisterCart, NativeRegisterDone, SALE_OVERRIDE } from './register/NativeRegister';
 import { isKioskShell, scannerInputMode } from './kiosk';
 import { errText } from './errText';
@@ -463,6 +469,13 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
 
   async function addFromSearch(unit: RegisterUnit) {
     try {
+      if (await denyOnlineOrderReserved(unit.sku)) {
+        setQ('');
+        setShowHits(false);
+        setError('');
+        searchRef.current?.focus();
+        return;
+      }
       const { data, error: lookupError } = await floorCloud().rpc('portal_bundle_for_sku', { p_sku: unit.sku });
       if (lookupError) throw lookupError;
       const bundle = data as { sku: string; components: { sku: string; title: string; quantity: number; isMain: boolean }[] } | null;
@@ -470,6 +483,13 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
         ? (await queryAvailableUnits(bundle.sku, 1))[0]
         : unit;
       if (!sellable) throw new Error('Bundle is out of stock.');
+      if (sellable.sku !== unit.sku && await denyOnlineOrderReserved(sellable.sku)) {
+        setQ('');
+        setShowHits(false);
+        setError('');
+        searchRef.current?.focus();
+        return;
+      }
       const includes = bundle?.components.filter(c => !c.isMain).map(c => ({
         sku: c.sku, title: c.title, quantity: c.quantity,
       }));
@@ -493,12 +513,22 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
         void addFromSearch(hits[0]);
         return;
       }
-      void queryAvailableUnits(term, 1)
-        .then(rows => {
+      void (async () => {
+        try {
+          if (await denyOnlineOrderReserved(term)) {
+            setQ('');
+            setShowHits(false);
+            setError('');
+            searchRef.current?.focus();
+            return;
+          }
+          const rows = await queryAvailableUnits(term, 1);
           if (rows[0]) void addFromSearch(rows[0]);
           else setError(`No available unit for “${term}”.`);
-        })
-        .catch(err => setError(authErrorMessage(err)));
+        } catch (err) {
+          setError(authErrorMessage(err));
+        }
+      })();
     } else if (e.key === 'Escape') {
       setShowHits(false);
     }
@@ -572,7 +602,8 @@ function RegisterInner({ staffSession, onNeedFullReload, variant = 'desktop' }: 
     });
   }
 
-  function addCustomPricedUnit(unit: RegisterUnit, priceCents: number) {
+  async function addCustomPricedUnit(unit: RegisterUnit, priceCents: number) {
+    if (await denyOnlineOrderReserved(unit.sku)) return;
     const backToAsk = unit.askCents != null && priceCents === unit.askCents;
     addUnit(unit, {
       priceCents,
