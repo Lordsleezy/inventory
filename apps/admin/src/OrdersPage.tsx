@@ -13,8 +13,9 @@ import { errText } from './errText';
 import { fileToBase64, labelFileUrl, orderAdmin } from './orderLabel';
 import { openShippingLabel } from './labelPrint';
 import {
-  canBuyLabel, hasLabel, onFileWeightLb, orderCanStepBack, orderChip, orderNeedsLabel,
-  orderStage, orderTimeline, packagedStale, shippedStale, weightChanged,
+  canBuyLabel, hasLabel, onFileWeightLb, orderCanStepBack, orderChip, orderHasClearableLabel,
+  orderNeedsLabel, orderStage, orderStepBackActionLabel, orderTimeline, packagedStale, shippedStale,
+  weightChanged,
 } from './orderStage';
 import { loadOrderLocations, locationCompare } from './locationOrder';
 import { sortLocationChoices, type LocationChoice } from './locationPlace';
@@ -357,12 +358,17 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
     const step = o.delivered_at ? 'Delivered → Shipped'
       : o.shipped_at ? (o.packaged_at ? 'Shipped → Packaged' : 'Shipped → To ship')
         : o.packaged_at ? 'Packaged → To ship'
-          : o.picked_up_at ? 'Picked up → Awaiting pickup' : '';
+          : o.picked_up_at ? 'Picked up → Awaiting pickup'
+            : orderHasClearableLabel(o) ? 'To ship → Needs label' : '';
     if (!step) { setError('There is no completed fulfillment step to undo.'); return; }
     if (!window.confirm(`Are you sure? Move this order back one step (${step}). The sale and money stay unchanged.`)) return;
     setBusy(o.id + 'step-back'); setError('');
     const { error: e } = await client.rpc('portal_order_step_back', { p_order: o.id });
-    if (e) setError(e.message);
+    if (e) {
+      setError(e.message === 'void_label_first'
+        ? 'Void the bought label first, then this order returns to Needs label.'
+        : e.message);
+    }
     await load(); setBusy(null);
   }
   async function pickedUp(o: WebOrder) {
@@ -867,6 +873,11 @@ export function OrdersPage({ client, accessToken, storeId, money, stamp, rules, 
               {!labeled && !buy && <button type="button" className="secondary" disabled={!!busy} onClick={() => document.getElementById(`order-label-${o.id}`)?.click()}>{busy === o.id + 'upload' ? 'Uploading…' : 'Add label'}</button>}
               {!labeled && !buy && <input id={`order-label-${o.id}`} type="file" accept="application/pdf,image/*" hidden disabled={!!busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void uploadOrderLabel(o, f); }} />}
               <button className="primary" disabled={!!busy} onClick={() => void markPackaged(o)}>{busy === o.id + 'packaged' ? 'Saving…' : 'Packaged'}</button>
+              {orderCanStepBack(o) && (
+                <button type="button" className="secondary" disabled={!!busy} onClick={() => void stepBack(o)}>
+                  {busy === o.id + 'step-back' ? 'Saving…' : orderStepBackActionLabel(o)}
+                </button>
+              )}
               {(o.channel || '').toLowerCase() !== 'depop' && <button className="secondary" disabled={!!busy || (o.label_cost_cents == null && o.pack_condition !== 'ok')} onClick={() => void recordLabelCost(o)}>{busy === o.id + 'label' ? 'Saving…' : o.label_cost_cents != null ? 'Edit label cost' : 'Record label cost'}</button>}
               {(!o.channel || o.channel === 'website') && <button className="text-button danger" disabled={!!busy} onClick={() => void cancel(o)}>Cancel & refund</button>}
               <button className="text-button danger" disabled={!!busy} onClick={() => void deleteOrder(o)}>{busy === o.id + 'delete' ? 'Deleting…' : 'Delete'}</button>

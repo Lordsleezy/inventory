@@ -8,7 +8,7 @@ import { loadOrderLocations, locationCompare } from '../locationOrder';
 import { sortLocationChoices, type LocationChoice } from '../locationPlace';
 import { fileToBase64, labelFileUrl, orderAdmin } from '../orderLabel';
 import { openShippingLabel } from '../labelPrint';
-import { hasLabel, orderCanMarkPackaged, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
+import { hasLabel, orderCanMarkPackaged, orderHasClearableLabel, orderNeedsLabel, orderStage, packagedStale, shippedStale, trackingTail, type OrderStage } from '../orderStage';
 import { useVisibleInterval } from '../useVisibleInterval';
 import { ScanOutPanel } from '../ScanOutPanel';
 import { SEG_SHORT } from '../orderDisplay';
@@ -449,12 +449,17 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     const step = o.delivered_at ? 'Delivered → Shipped'
       : o.shipped_at ? (o.packaged_at ? 'Shipped → Packaged' : 'Shipped → To ship')
         : o.packaged_at ? 'Packaged → To ship'
-          : o.picked_up_at ? 'Picked up → Awaiting pickup' : '';
+          : o.picked_up_at ? 'Picked up → Awaiting pickup'
+            : orderHasClearableLabel(o) ? 'To ship → Needs label' : '';
     if (!step) { setError('There is no completed fulfillment step to undo.'); return; }
     if (!window.confirm(`Are you sure? Move this order back one step (${step}). The sale and money stay unchanged.`)) return;
     await runAction('step-back', async () => {
       const { error: e } = await client.rpc('portal_order_step_back', { p_order: o.id });
-      if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an owner or manager can move an order back.' : e.message);
+      if (e) {
+        if (e.message === 'portal_access_denied') throw new Error('Only an owner or manager can move an order back.');
+        if (e.message === 'void_label_first') throw new Error('Void the bought label first, then this order returns to Needs label.');
+        throw new Error(e.message);
+      }
     });
   }
 
@@ -464,13 +469,17 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
     const step = lead.delivered_at ? 'Delivered → Shipped'
       : lead.shipped_at ? (lead.packaged_at ? 'Shipped → Packaged' : 'Shipped → To ship')
         : lead.packaged_at ? 'Packaged → To ship'
-          : '';
+          : orderHasClearableLabel(lead) ? 'To ship → Needs label' : '';
     if (!step) { setError('There is no completed fulfillment step to undo.'); return; }
     if (!window.confirm(`Are you sure? Move this whole shipment back one step (${step}). The sale and money stay unchanged.`)) return;
     await runAction('step-back', async () => {
       for (const order of shipment.items) {
         const { error: e } = await client.rpc('portal_order_step_back', { p_order: order.id });
-        if (e) throw new Error(e.message === 'portal_access_denied' ? 'Only an owner or manager can move an order back.' : e.message);
+        if (e) {
+          if (e.message === 'portal_access_denied') throw new Error('Only an owner or manager can move an order back.');
+          if (e.message === 'void_label_first') throw new Error('Void the bought label first, then this order returns to Needs label.');
+          throw new Error(e.message);
+        }
       }
     });
   }

@@ -4,7 +4,8 @@ import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
 import { locationMenuLabel, type LocationChoice } from '../locationPlace';
 import {
-  hasLabel, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel, orderNeedsWeightVerify, orderStage,
+  hasLabel, orderCanMarkPackaged, orderCanStepBack, orderHasClearableLabel, orderNeedsLabel,
+  orderNeedsWeightVerify, orderStage, orderStepBackActionLabel,
   carrierTrackUrl, type OrderStage,
 } from '../orderStage';
 import { listThumbPhoto, type UnitPhoto } from '../unitPhotos';
@@ -149,7 +150,7 @@ export function AppShipmentDetail(props: AppShipmentDetailProps) {
               <ShipmentMenu
                 busy={!!busy}
                 canStepBack={orderCanStepBack(lead)}
-                stage={stage}
+                stepBackLabel={orderStepBackActionLabel(lead)}
                 onStepBack={onStepBack}
                 showUnbundle={!!showUnbundle}
                 onUnbundle={onUnbundle}
@@ -267,6 +268,11 @@ export function AppShipmentDetail(props: AppShipmentDetailProps) {
                 <p className="app-order-problem">Tracking still needed — enter it below.</p>
               ) : null}
             </div>
+            {isAdmin && orderHasClearableLabel(lead) && (
+              <button type="button" className="app-order-text-back" disabled={!!busy} onClick={onStepBack}>
+                Move back to Needs label
+              </button>
+            )}
           </section>
         )}
 
@@ -395,11 +401,11 @@ export function AppShipmentDetail(props: AppShipmentDetailProps) {
 }
 
 function ShipmentMenu({
-  busy, canStepBack, stage, onStepBack, showUnbundle, onUnbundle, unbundleBusy, canVoid, onVoid,
+  busy, canStepBack, stepBackLabel, onStepBack, showUnbundle, onUnbundle, unbundleBusy, canVoid, onVoid,
 }: {
   busy: boolean;
   canStepBack: boolean;
-  stage: string;
+  stepBackLabel: string;
   onStepBack: () => void;
   showUnbundle: boolean;
   onUnbundle?: () => void;
@@ -415,7 +421,7 @@ function ShipmentMenu({
         <div className="app-order-nav-pop">
           {canStepBack && (
             <button type="button" disabled={busy} onClick={() => { setMenuOpen(false); onStepBack(); }}>
-              {stage === 'shipped' ? 'Move back to Packaged' : 'Step back one step'}
+              {stepBackLabel}
             </button>
           )}
           {showUnbundle && onUnbundle && (

@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  carrierTrackUrl, orderCanMarkPackaged, orderCanStepBack, orderChip, orderNeedsWeightVerify,
-  orderStage, orderTimeline, packagedStale, shippedStale, weightChanged,
+  carrierTrackUrl, orderCanMarkPackaged, orderCanStepBack, orderChip, orderHasClearableLabel,
+  orderNeedsWeightVerify, orderStage, orderStepBackActionLabel, orderTimeline, packagedStale,
+  shippedStale, weightChanged,
 } from './orderStage.ts';
 
 const day = '2026-11-07T21:14:00Z';
@@ -15,10 +16,24 @@ test('orderCanMarkPackaged on paid ship orders before packaged', () => {
   assert.equal(orderCanMarkPackaged({ status: 'paid', fulfillment: 'ship', channel: 'ebay', ...verified }), false);
 });
 
-test('orderCanStepBack only on paid orders with a fulfillment timestamp', () => {
+test('orderCanStepBack on paid fulfillment timestamps or a clearable to-ship label', () => {
   assert.equal(orderCanStepBack({ status: 'paid', fulfillment: 'ship' }), false);
   assert.equal(orderCanStepBack({ status: 'paid', fulfillment: 'ship', packaged_at: day }), true);
   assert.equal(orderCanStepBack({ status: 'canceled', fulfillment: 'ship', packaged_at: day }), false);
+  assert.equal(orderCanStepBack({
+    status: 'paid', fulfillment: 'ship', channel: 'depop',
+    label_storage_path: 'labels/x.pdf', label_origin: 'upload',
+  }), true);
+  assert.equal(orderHasClearableLabel({
+    status: 'paid', fulfillment: 'ship', label_origin: 'bought', label_url: 'https://x',
+  }), false);
+  assert.equal(orderStepBackActionLabel({
+    status: 'paid', fulfillment: 'ship', channel: 'depop',
+    label_storage_path: 'labels/x.pdf', label_origin: 'upload',
+  }), 'Move back to Needs label');
+  assert.equal(orderStepBackActionLabel({
+    status: 'paid', fulfillment: 'ship', packaged_at: day,
+  }), 'Move back to To ship');
 });
 
 test('verify weight comes before needs label and package', () => {

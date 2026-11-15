@@ -5,7 +5,8 @@ import { displayOrderTitle } from '../orderDisplay';
 import { locationParts } from '../locationOrder';
 import { locationMenuLabel, type LocationChoice } from '../locationPlace';
 import {
-  canBuyLabel, hasLabel, onFileWeightLb, orderCanMarkPackaged, orderCanStepBack, orderNeedsLabel,
+  canBuyLabel, hasLabel, onFileWeightLb, orderCanMarkPackaged, orderCanStepBack, orderHasClearableLabel,
+  orderNeedsLabel, orderStepBackActionLabel,
   orderStage, weightChanged, carrierTrackUrl, type OrderStage,
 } from '../orderStage';
 import { listThumbPhoto, type UnitPhoto } from '../unitPhotos';
@@ -199,7 +200,7 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
                 <div className="app-order-nav-pop">
                   {orderCanStepBack(order) && (
                     <button type="button" disabled={!!busy} onClick={() => { setMenuOpen(false); onStepBack(); }}>
-                      {stage === 'shipped' ? 'Move back to Packaged' : 'Step back one step'}
+                      {orderStepBackActionLabel(order)}
                     </button>
                   )}
                   {onRecordLabelCost && (
@@ -353,6 +354,11 @@ export function AppOrderDetail(props: AppOrderDetailProps) {
                 </li>
               )}
             </ol>
+            {isAdmin && orderHasClearableLabel(order) && (
+              <button type="button" className="app-order-text-back" disabled={!!busy} onClick={onStepBack}>
+                Move back to Needs label
+              </button>
+            )}
           </section>
         )}
 

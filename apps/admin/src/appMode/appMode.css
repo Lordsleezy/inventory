@@ -78,6 +78,8 @@ html.app-mode .floor-live-build-banner {
 }
 
 html.app-mode .app-pull-sheet {
+  position: relative;
+  height: 100%;
   min-height: 100%;
   background: #000;
   transition: transform 0.34s cubic-bezier(.22, 1, .36, 1);

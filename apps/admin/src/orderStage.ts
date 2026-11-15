@@ -100,10 +100,44 @@ export function onFileWeightLb(o: StageOrder) {
   return null;
 }
 
-/** Admin-only undo: at least one fulfillment timestamp is set (ship or pickup). */
+/**
+ * Uploaded / manual label that an admin can clear with step-back.
+ * Carrier-bought labels use Void label (refund) instead.
+ */
+export function orderHasClearableLabel(o: StageOrder) {
+  if (o.packaged_at || o.shipped_at || o.delivered_at) return false;
+  if (o.label_origin === 'bought') return false;
+  return !!(
+    o.label_storage_path
+    || o.label_uploaded_at
+    || o.label_origin === 'upload'
+    || o.label_url
+    || o.label_purchased_at
+    || String(o.tracking_number || '').trim()
+    || o.label_tracking_mismatch
+  );
+}
+
+/** Admin-only undo: fulfillment timestamp, or clearable to_ship label → Needs label. */
 export function orderCanStepBack(o: StageOrder) {
   if (o.status && o.status !== 'paid') return false;
-  return !!(o.delivered_at || o.shipped_at || o.packaged_at || o.picked_up_at);
+  if (o.delivered_at || o.shipped_at || o.packaged_at || o.picked_up_at) return true;
+  if (o.fulfillment === 'ship' && orderHasClearableLabel(o)) return true;
+  return false;
+}
+
+/** Short action label for the admin step-back control. */
+export function orderStepBackActionLabel(o: StageOrder) {
+  if (o.delivered_at) return 'Move back to Shipped';
+  if (o.shipped_at) return o.packaged_at ? 'Move back to Packaged' : 'Move back to To ship';
+  if (o.packaged_at) return 'Move back to To ship';
+  if (o.picked_up_at) return 'Move back to Awaiting pickup';
+  if (orderHasClearableLabel(o)) {
+    const ch = (o.channel || '').toLowerCase();
+    if (ch === 'ebay' || ch === 'depop') return 'Move back to Needs label';
+    return 'Clear label';
+  }
+  return 'Step back one step';
 }
 
 export function orderStage(o: StageOrder): OrderStage {
