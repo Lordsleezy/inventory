@@ -46,15 +46,33 @@ function hashDistance(a, b) {
   while (bits) { bits &= bits - 1n; count++; }
   return count;
 }
-async function downloadStockImage(url) {
+function amazonLargeUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (!/media-amazon|images-amazon/i.test(parsed.hostname)) return "";
+    if (/\._[A-Za-z0-9,]+_\./.test(parsed.pathname)) return "";
+    parsed.pathname = parsed.pathname.replace(/(\.[a-z0-9]+)$/i, "._AC_SL1500_$1");
+    return parsed.href === url ? "" : parsed.href;
+  } catch {
+    return "";
+  }
+}
+
+function allowedStockHost(hostname) {
+  const host = String(hostname || "").toLowerCase();
+  return STOCK_IMAGE_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`));
+}
+
+async function downloadStockImageAt(url) {
   const parsed = new URL(url);
   const host = parsed.hostname.toLowerCase();
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password ||
-      !STOCK_IMAGE_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`)) || riskyImageText.test(parsed.pathname)) {
+      !allowedStockHost(host) || riskyImageText.test(parsed.pathname)) {
     throw new Error('stock_photo_source_or_quality_rejected');
   }
-  const response = await fetch(parsed.href, { redirect: 'error', signal: AbortSignal.timeout(12000),
+  const response = await fetch(parsed.href, { redirect: 'follow', signal: AbortSignal.timeout(12000),
     headers: { Accept: 'image/avif,image/webp,image/png,image/jpeg' } });
+  if (!allowedStockHost(new URL(response.url || parsed.href).hostname)) throw new Error('stock_photo_source_or_quality_rejected');
   const mime = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
   const ext = ({ 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/avif': 'avif' })[mime];
   if (!response.ok || !ext) throw new Error('stock_photo_unavailable');
@@ -66,8 +84,18 @@ async function downloadStockImage(url) {
   const bytes = Buffer.concat(chunks, total);
   const { default: sharp } = await import('sharp');
   const info = await sharp(bytes).metadata();
-  if (bytes.length < 2048 || Math.max(info.width || 0, info.height || 0) < 500) throw new Error('stock_photo_below_500px');
+  if (bytes.length < 2048 || Math.max(info.width || 0, info.height || 0) < 160) throw new Error('stock_photo_too_small');
   return { bytes, mime, ext, hash: await stockPhotoHash(bytes) };
+}
+
+async function downloadStockImage(url) {
+  const large = amazonLargeUrl(url);
+  if (!large) return downloadStockImageAt(url);
+  try {
+    return await downloadStockImageAt(large);
+  } catch {
+    return downloadStockImageAt(url);
+  }
 }
 
 function catalogPhotoUrls(product, payload) {
@@ -199,7 +227,11 @@ export async function invoke(event) {
     ]);
     const payload = cached.data?.payload || {};
     const storedUrl = catalogPhotoUrls(product.data, payload).find(url => sameCatalogPhoto(url, photoUrl));
-    if (!storedUrl) return json(403, { ok: false, error: 'catalog_photo_mismatch' });
+    if (!storedUrl) {
+      await floorLog({ level: 'warn', event: 'receive_photo.stock_stage_failed', storeId: ctx.storeId,
+        message: 'catalog_photo_mismatch' });
+      return json(403, { ok: false, error: 'catalog_photo_mismatch' });
+    }
     try {
       const image = await downloadStockImage(storedUrl);
       const path = `${ctx.storeId}/receive/${ctx.userId}/${requestId}/stock-${randomUUID()}.${image.ext}`;

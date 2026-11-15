@@ -246,7 +246,7 @@ export function ReceiveWizard({
                 <button type="button" onClick={onWrongPhoto}>Wrong photo</button>
               </figure>
             )}
-            {stockUrl && <p>Stock photo saved. You still need your own photo.</p>}
+            {stockUrl && <p>Stock photo. It saves with the photo you take.</p>}
             {photoPreviews.map(url => <img key={url} className="receive-stock" src={url} alt="Your photo" />)}
             <label className="receive-photo-take">
               <input type="file" accept="image/*" capture="environment" onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) onPhoto(file); }} />

@@ -568,7 +568,7 @@ export async function lookupUpc(storeId, rawCode, opts = {}) {
       if (!merged.images?.length && !cachedHit?.payload?.stock_photo_checked) {
         try {
           const { catalogStockPhotos, stockPhotoSearchTimed } = await import("./receive-stock-photos.mjs");
-          const foundPhotos = await stockPhotoSearchTimed(catalogStockPhotos(storeId, { brand: merged.brand, title: merged.title }));
+          const foundPhotos = await stockPhotoSearchTimed(catalogStockPhotos(storeId, { brand: merged.brand, title: merged.title }), 20000);
           const images = foundPhotos.images || [];
           if (images.length) {
             merged.images = images;
