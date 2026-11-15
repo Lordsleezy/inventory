@@ -31,6 +31,8 @@ import type { OnlineCfg, Rule, CommissionOverride } from '../payouts';
 import { parseNavFromLocation } from '../navigation';
 import { deskRoleLabel, phoneTabIds } from '../deskNav';
 import { LiveBuildBanner } from '../LiveBuildBanner';
+import { isAndroid, isStandaloneApp } from './isAppMode';
+import { removeStorePhoneCornerControls } from './storePhoneFloaters';
 
 export type AppTab = 'inventory' | 'receive' | 'register' | 'orders' | 'returns' | 'more' | 'settings' | 'locations';
 
@@ -270,6 +272,28 @@ export function AppModeShell({
       document.removeEventListener('touchstart', onStart, { capture: true });
       document.removeEventListener('touchmove', onMove, { capture: true });
       document.removeEventListener('focusin', onFocus);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isAndroid() || !isStandaloneApp()) return;
+    document.documentElement.classList.add('floor-store-phone');
+    let frame = 0;
+    const run = () => {
+      frame = 0;
+      removeStorePhoneCornerControls(document);
+    };
+    const kick = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(run);
+    };
+    kick();
+    const obs = new MutationObserver(kick);
+    obs.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      document.documentElement.classList.remove('floor-store-phone');
+      obs.disconnect();
+      if (frame) cancelAnimationFrame(frame);
     };
   }, []);
 
