@@ -60,6 +60,16 @@ test('no barcode opens the Gemini camera, and Defective is the title-only save',
   assert.match(panel, /p_condition: SCRATCH/);
 });
 
+test('adding to an existing SKU asks for a bay before it saves', async () => {
+  const wizard = await readFile(new URL('./ReceiveWizard.tsx', import.meta.url), 'utf8');
+  assert.match(wizard, /Bay for these items/);
+  assert.match(wizard, /Pick a bay for these items/);
+  assert.match(wizard, /onAddToStock\(stockMatches\[0\]\.sku, noLocation \? '' : location\)/);
+  assert.match(wizard, /!stockBayReady/);
+  const panel = await readFile(new URL('./ReceivePanel.tsx', import.meta.url), 'utf8');
+  assert.match(panel, /p_location: place/);
+});
+
 test('eBay category and specifics never get a Receive screen', () => {
   assert.deepEqual(receiveStepPlan({
     doNotList: false, brand: 'Infinity X1', title: 'Flashlight',
