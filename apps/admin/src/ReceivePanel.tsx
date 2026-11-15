@@ -1736,7 +1736,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
   async function addToExistingStock(match: StockMatch, locationCode?: string | null) {
     const quantity = Number(form.quantity);
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Enter a valid quantity.'); return; }
-    const place = locationCode === undefined ? (selectedLocation || null) : (locationCode.trim() || null);
+    const place = locationCode === undefined ? (selectedLocation || null) : (locationCode?.trim() || null);
     setBusy(true); setError('');
     try {
       const { data, error: e } = await client.rpc(match.is_stocked ? 'portal_stock_receive_add' : 'portal_stock_convert_and_add', { p_request: receiveRequest.current, p_sku: match.sku, p_quantity: quantity, p_location: place });
