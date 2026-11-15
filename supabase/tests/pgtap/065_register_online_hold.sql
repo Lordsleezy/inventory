@@ -76,7 +76,7 @@ insert into public.web_orders (
   store_id, sku, channel, order_no, status, fulfillment,
   item_cents, shipping_cents, tax_cents, total_cents, paid_at, payment_env
 ) values (
-  current_setting('test.store')::uuid, '97203', 'depop', 'HOLD-STOCK-1', 'paid', 'ship',
+  current_setting('test.store')::uuid, '97203', 'ebay', 'HOLD-STOCK-1', 'paid', 'ship',
   900, 0, 0, 900, now(), 'live'
 );
 
