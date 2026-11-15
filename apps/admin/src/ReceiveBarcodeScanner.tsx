@@ -54,11 +54,13 @@ function cameraErrorMessage(e: unknown) {
   return 'Camera unavailable. Type the digits under the barcode, or tap Tap to start camera.';
 }
 
-export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onPhoto, banner }: {
+export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onPhoto, onDefective, banner }: {
   onDetect: (code: string) => void;
   onClose: () => void;
   mode?: 'barcode' | 'photo';
   onPhoto?: (file: File) => void;
+  /** Photo mode: skip the Gemini scan and save a title as do-not-list defective. */
+  onDefective?: () => void;
   banner?: ReactNode;
 }) {
   const video = useRef<HTMLVideoElement>(null);
@@ -327,6 +329,11 @@ export function ReceiveBarcodeScanner({ onDetect, onClose, mode = 'barcode', onP
         </button>
       )}
       {err && <p className="receive-scanner-error" role="alert">{err}</p>}
+      {mode === 'photo' && onDefective && (
+        <div className="receive-scanner-type">
+          <button type="button" className="receive-scanner-defective" onClick={() => { stopCamera.current?.(false); onDefective(); }}>Defective</button>
+        </div>
+      )}
       {mode === 'barcode' && <form className="receive-scanner-type" onSubmit={event => { event.preventDefault(); submitTyped(); }}>
         <label>Type UPC<input inputMode="numeric" autoComplete="off" value={typed} onChange={event => { setTyped(event.target.value); if (err) setErr(''); }} /></label>
         <button type="submit">Look up</button>

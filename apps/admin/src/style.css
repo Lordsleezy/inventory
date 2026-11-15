@@ -679,6 +679,7 @@ html.app-mode .receive-chip.on{background:#fff!important;color:#000!important}
 .receive-home label{display:grid;gap:4px}
 .receive-home .receive-home-error,.receive-home .manifest-search-attention{color:#e10600;font-weight:700}
 .receive-scanner-type label{display:flex;flex:1;gap:8px;align-items:center}
+.receive-scanner-defective{flex:1}
 .receive-scanner-type input{width:100%}
 .receive-scanner-error{position:absolute;left:16px;right:16px;top:calc(72px + env(safe-area-inset-top, 0px));color:#e10600;font-weight:700;z-index:4;pointer-events:none}
 .receive-modal{position:fixed;inset:0;background:#17232d99;z-index:40;display:flex;align-items:center;justify-content:center;padding:16px}.receive-modal-portal{z-index:10050}.receive-modal-card{background:#fff;border-radius:14px;padding:22px;width:min(480px,100%);display:grid;gap:12px;box-shadow:0 18px 50px #17232d40}.receive-modal-card h3{margin:0}.receive-video{width:100%;border-radius:10px;background:#000;max-height:50vh}
