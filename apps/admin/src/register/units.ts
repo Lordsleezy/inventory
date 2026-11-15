@@ -1,4 +1,9 @@
 ﻿import { floorCloud, stripCostFromUnit, webDerivativePath } from '@floor/cloud';
+import {
+  ONLINE_ORDER_RESERVED_MESSAGE,
+  isOnlineOrderHeld,
+  type OnlineOrderHold,
+} from './onlineHold';
 
 export type RegisterUnit = {
   sku: string;
@@ -12,6 +17,43 @@ export type RegisterUnit = {
   qtyOnHand: number;
   photoUrl: string | null;
 };
+
+export {
+  ONLINE_ORDER_RESERVED_MESSAGE,
+  isOnlineOrderHeld,
+  type OnlineOrderHold,
+} from './onlineHold';
+
+/**
+ * Ask the server whether this SKU is reserved for an open online order.
+ * Fails open (not held) if the RPC is missing or errors — register must keep working.
+ */
+export async function fetchOnlineOrderHold(skuOrQuery: string): Promise<OnlineOrderHold> {
+  const q = skuOrQuery.trim();
+  if (!q) return { held: false };
+  try {
+    const { data, error } = await floorCloud().rpc('portal_register_online_hold', { p_sku: q });
+    if (error || data == null) return { held: false };
+    const row = data as Record<string, unknown>;
+    return {
+      held: row.held === true,
+      sku: typeof row.sku === 'string' ? row.sku : undefined,
+      orderNo: typeof row.order_no === 'string' ? row.order_no : null,
+      channel: typeof row.channel === 'string' ? row.channel : null,
+      fulfillment: typeof row.fulfillment === 'string' ? row.fulfillment : null,
+    };
+  } catch {
+    return { held: false };
+  }
+}
+
+/** Alert + return true when the SKU must not be added to the register ticket. */
+export async function denyOnlineOrderReserved(skuOrQuery: string): Promise<boolean> {
+  const hold = await fetchOnlineOrderHold(skuOrQuery);
+  if (!isOnlineOrderHeld(hold)) return false;
+  window.alert(ONLINE_ORDER_RESERVED_MESSAGE);
+  return true;
+}
 
 const BASE_COLUMNS = 'sku, title, brand, model, category, condition, ask_cents, state';
 const SELECT = `${BASE_COLUMNS}, qty_on_hand`;
