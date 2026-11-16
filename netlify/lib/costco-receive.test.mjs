@@ -279,6 +279,31 @@ test("a different color is not used as the stock photo", () => {
   assert.deepEqual(images, []);
 });
 
+test("another product's size is not saved as this item's box", () => {
+  const card = buildCostcoReceive({
+    line: { ...line, description: "FOSTER GRANT 668 READING GLASSES", brand: "Foster Grant", upc_normalized: "0193033762301" },
+    enrich: { expanded_title: "Foster Grant Design Optics Metal Square Reading Glasses, 3-Pack" },
+    product: {
+      title: "3-Piece Square Dining Table Set",
+      brand: "AF ARTISAN FURNITURE",
+      aspects: { item_dims: { length_in: 39.76, width_in: 39.76, height_in: 4.33, weight_lb: 80 } },
+    },
+    amazon: {
+      found: true,
+      identifier_match: false,
+      title: "3-Piece Square Dining Table Set",
+      brand: "AF ARTISAN FURNITURE",
+      item: { length_in: 39.76, width_in: 39.76, height_in: 4.33, weight_lb: 80 },
+      package: { length_in: 40, width_in: 40, height_in: 5, weight_lb: 80 },
+    },
+  });
+  assert.match(card.merged.title, /Foster Grant/);
+  assert.equal(card.merged.package.weight_lb, null);
+  assert.equal(card.merged.package.length_in, null);
+  assert.equal(card.merged.aspects.product_weight_lb, undefined);
+  assert.equal(card.merged.aspects.product_depth_in, undefined);
+});
+
 test("Costco's own photo is kept and another seller's photo is not", () => {
   assert.equal(keepStockPhoto({ url: "https://bfasset.costco-static.com/a.jpg", source: "costco" }), true);
   assert.equal(keepStockPhoto({ url: "https://i.ebayimg.com/images/g/seller.jpg", source: "costco" }), false);

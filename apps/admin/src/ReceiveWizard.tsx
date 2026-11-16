@@ -93,7 +93,7 @@ export function ReceiveWizard({
     doNotList,
     brand: form.unbranded ? 'Unbranded' : form.brand,
     title: form.title,
-    hasDims: [form.productDepth, form.productWidth, form.productHeight, form.productWeight].every(value => Number(value) > 0),
+    hasDims: [form.length, form.width, form.height, form.weight].every(value => Number(value) > 0),
     hasStockMatch: stockMatches.length > 0,
     manifestPrice: usesManifestPrice,
   }), [doNotList, form, stockMatches.length, usesManifestPrice]);
@@ -132,7 +132,7 @@ export function ReceiveWizard({
     if (step === 'confirm' && delta < 0) { onClear(); return; }
     if (delta > 0 && step === 'brand' && !form.brand.trim()) return;
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
-    if (delta > 0 && step === 'dims' && ![form.productDepth, form.productWidth, form.productHeight, form.productWeight].every(value => Number(value) > 0)) return;
+    if (delta > 0 && step === 'dims' && ![form.length, form.width, form.height, form.weight].every(value => Number(value) > 0)) return;
     const next = adjacentReceiveStep(plan, step as ReceiveStepId, delta > 0 ? 1 : -1);
     if (next) setStep(next);
   }
@@ -334,10 +334,10 @@ export function ReceiveWizard({
       {step === 'dims' && (
         <div className="receive-step">
           <h2>Size & weight <span className="receive-step-req">*</span></h2>
-          <label>Length<input inputMode="decimal" value={form.productDepth} onChange={event => update('productDepth', event.target.value)} /></label>
-          <label>Width<input inputMode="decimal" value={form.productWidth} onChange={event => update('productWidth', event.target.value)} /></label>
-          <label>Height<input inputMode="decimal" value={form.productHeight} onChange={event => update('productHeight', event.target.value)} /></label>
-          <label>Weight, lb<input inputMode="decimal" value={form.productWeight} onChange={event => update('productWeight', event.target.value)} /></label>
+          <label>Length<input inputMode="decimal" value={form.length} onChange={event => update('length', event.target.value)} /></label>
+          <label>Width<input inputMode="decimal" value={form.width} onChange={event => update('width', event.target.value)} /></label>
+          <label>Height<input inputMode="decimal" value={form.height} onChange={event => update('height', event.target.value)} /></label>
+          <label>Weight, lb<input inputMode="decimal" value={form.weight} onChange={event => update('weight', event.target.value)} /></label>
           {nav}
         </div>
       )}
@@ -431,8 +431,8 @@ export function ReceiveWizard({
               ['Condition', `${form.condition || '—'}${doNotList ? ' · Do not list' : ''}`, 'condition'],
               ['Price', doNotList ? '' : (form.ask ? `$${form.ask}` : '—'), 'price'],
               ['Quantity', doNotList ? '' : (form.quantity || '1'), 'price'],
-              ['Size', doNotList ? '' : ([form.productDepth, form.productWidth, form.productHeight].every(value => Number(value) > 0) ? `${form.productDepth} × ${form.productWidth} × ${form.productHeight} in` : '—'), 'dims'],
-              ['Weight', doNotList ? '' : (Number(form.productWeight) > 0 ? `${form.productWeight} lb` : '—'), 'dims'],
+              ['Size', doNotList ? '' : ([form.length, form.width, form.height].every(value => Number(value) > 0) ? `${form.length} × ${form.width} × ${form.height} in` : '—'), 'dims'],
+              ['Weight', doNotList ? '' : (Number(form.weight) > 0 ? `${form.weight} lb` : '—'), 'dims'],
               ['Location', noLocation || !location ? 'No location' : locationMenuLabel(locations.find(item => item.code === location) || { code: location }), 'location'],
               ['Photos', hasPhoto ? String(photoPreviews.length || 1) : '—', 'photo'],
             ] as [string, string, ReceiveStepId][]).filter(([, value]) => value).map(([label, value, target]) => (

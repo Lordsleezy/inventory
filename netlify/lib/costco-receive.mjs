@@ -218,6 +218,38 @@ function storedBoxMeasure(product, column) {
   return numberOrNull(product?.[column]);
 }
 
+const GENERIC_MEASURE_WORDS = new Set(["pack", "piece", "pieces", "black", "white", "square", "metal", "small", "large", "size", "inch", "inches", "count", "with", "from", "blue", "gray", "grey", "home", "set"]);
+
+function measureWords(value) {
+  return new Set(clean(value).toLowerCase().split(/[^a-z0-9]+/).filter((token) => token.length > 3 && !GENERIC_MEASURE_WORDS.has(token)));
+}
+
+/** A catalog size belongs to this receive only when it is the same product. */
+function measurementAgrees(source, identity) {
+  const sourceBrand = clean(source?.brand);
+  const identityBrand = clean(identity?.brand);
+  const sourceTitle = clean(source?.title);
+  const identityTitle = clean(identity?.title);
+  if (!sourceTitle && !sourceBrand) return true;
+  if (!identityTitle && !identityBrand) return true;
+  const brandHit = (left, right) => {
+    const a = left.toLowerCase();
+    const b = right.toLowerCase();
+    return a === b || a.includes(b) || b.includes(a);
+  };
+  if (sourceBrand && identityBrand && !brandHit(sourceBrand, identityBrand)) {
+    const sourceInTitle = identityTitle && identityTitle.toLowerCase().includes(sourceBrand.toLowerCase());
+    const identityInTitle = sourceTitle && sourceTitle.toLowerCase().includes(identityBrand.toLowerCase());
+    if (!sourceInTitle && !identityInTitle) return false;
+  }
+  if (sourceBrand && identityBrand && brandHit(sourceBrand, identityBrand)) return true;
+  const left = measureWords(`${sourceBrand || ""} ${sourceTitle || ""}`);
+  const right = measureWords(`${identityBrand || ""} ${identityTitle || ""}`);
+  if (!left.size || !right.size) return false;
+  for (const token of left) if (right.has(token)) return true;
+  return false;
+}
+
 function packageFrom(product, amazon, pinned) {
   const box = pinned?.package || {};
   return {
@@ -285,8 +317,12 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
     product, amazon, expandedTitle, trusted: useCatalog,
   });
   const expandedPkg = enrich?.package && typeof enrich.package === "object" ? enrich.package : {};
-  // The title can stay untrusted. The box measured for this barcode still fills Receive.
-  const catalogBox = packageFrom(product, amazon, useCatalog ? pinned : null);
+  const identity = { title, brand };
+  const agreedAmazon = measurementAgrees(amazon, identity) ? amazon : null;
+  const agreedProduct = measurementAgrees(product, identity) ? product : null;
+  // The title can stay untrusted. A box saved for this barcode still fills Receive.
+  // Another product's item size does not.
+  const catalogBox = packageFrom(product, agreedAmazon, useCatalog ? pinned : null);
   const listed = upcitemdb?.package || {};
   const pkg = {
     length_in: catalogBox.length_in || numberOrNull(expandedPkg.length_in) || numberOrNull(listed.length_in),
@@ -294,8 +330,8 @@ export function buildCostcoReceive({ line, enrich = {}, product = null, amazon =
     height_in: catalogBox.height_in || numberOrNull(expandedPkg.height_in) || numberOrNull(listed.height_in),
     weight_lb: catalogBox.weight_lb || numberOrNull(expandedPkg.weight_lb) || numberOrNull(listed.weight_lb),
   };
-  const aspects = useCatalog ? itemAspects(product, amazon, pinned) : specificsFrom(enrich?.specifics);
-  for (const [key, value] of Object.entries(itemSize(product, amazon, upcitemdb))) {
+  const aspects = useCatalog ? itemAspects(agreedProduct, agreedAmazon, pinned) : specificsFrom(enrich?.specifics);
+  for (const [key, value] of Object.entries(itemSize(agreedProduct, agreedAmazon, upcitemdb))) {
     if (value) aspects[key] = String(value);
   }
   const pack = packCountOf(line?.description, enrich?.variant_note, product?.aspects);
@@ -510,13 +546,13 @@ async function persistShownPhotos(sb, ctx, images) {
 async function withCatalogStock(sb, storeId, ctx, line, card) {
   let shown = card;
   const owned = ownedCatalogImages(ctx?.product);
-  const sameItem = clean(ctx?.product?.title) && clean(ctx.product.title) === clean(card?.merged?.title);
+  const sameItem = measurementAgrees(ctx?.product, { title: card?.merged?.title, brand: card?.merged?.brand });
   if (!shown?.merged?.images?.length && sameItem && owned.length) shown = cardWithImages(shown, owned);
   if (shown?.merged?.images?.length) {
     await persistShownPhotos(sb, ctx, shown.merged.images).catch(() => undefined);
     return shown;
   }
-  if (shown?.receive?.internal || shown?.receive?.bucket === "search" || ctx?.enrich?.stock_photo_checked) {
+  if (shown?.receive?.internal || shown?.receive?.bucket === "search" || (ctx?.enrich?.stock_photo_checked && sameItem)) {
     return shown;
   }
   const { catalogStockPhotos, stockPhotoSearchTimed } = await import("./receive-stock-photos.mjs");
@@ -533,12 +569,15 @@ async function withCatalogStock(sb, storeId, ctx, line, card) {
   }
   if (item) await remember(sb, storeId, ctx.key, ctx.book || {}, item, { images, stock_photo_checked: true }).catch(() => undefined);
   if (ctx?.gtin?.ok && !isCostcoInternalCode(ctx.gtin.gtin14)) {
-    const saved = [...new Set([...images, ...(ctx.product?.images || [])])].slice(0, 8);
+    const saved = [...new Set([...images, ...(sameItem ? (ctx.product?.images || []) : [])])].slice(0, 8);
     if (ctx.product) {
-      await sb.from("floor_products").update({
-        images: saved,
-        updated_at: new Date().toISOString(),
-      }).eq("gtin14", ctx.gtin.gtin14);
+      const patch = { images: saved, updated_at: new Date().toISOString() };
+      if (!sameItem && ctx.product.aspects?.item_dims) {
+        const aspects = { ...ctx.product.aspects };
+        delete aspects.item_dims;
+        patch.aspects = aspects;
+      }
+      await sb.from("floor_products").update(patch).eq("gtin14", ctx.gtin.gtin14);
     } else {
       const { saveFloorProduct } = await import("./floor-products.mjs");
       await saveFloorProduct(sb, ctx.gtin, {

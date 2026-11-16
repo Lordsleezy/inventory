@@ -1448,9 +1448,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     return files.length > 0 || stagedPhotoPaths.length > 0;
   }
   function recordedSize() {
-    return appChrome
-      ? [form.productDepth, form.productWidth, form.productHeight, form.productWeight]
-      : [form.length, form.width, form.height, form.weight];
+    return [form.length, form.width, form.height, form.weight];
   }
   function dimensionsReady() {
     return recordedSize().every(v => {
@@ -1552,7 +1550,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > 100) { setError('Quantity must be 1–100.'); return; }
     let acceptedStockPhotoPath = titleOnlyReceive ? '' : stockPhotoPath;
     let acceptedStockPhotoUrl = titleOnlyReceive ? '' : stockPhotoSourceUrl;
-    const stockUrl = String(current?.result?.stock_photos?.find(photo => photo?.url)?.url || merged?.images?.[0] || '');
+    const stockUrl = String(stockPhotoUrls[0]?.url || '');
     if (!titleOnlyReceive && !acceptedStockPhotoPath && !manual && stockUrl && current?.upc) {
       acceptedStockPhotoUrl = stockUrl;
       acceptedStockPhotoPath = await stageStockPhoto(stockUrl, current.upc, current.id) || '';
@@ -2324,7 +2322,7 @@ export function ReceivePanel({ client, storeId, accessToken, onSaved, appChrome,
               }),
             }).then(async response => {
               const json = await response.json().catch(() => ({}));
-              if (json.same === false) setStockPhotoUrls(json.replacement ? [{ url: json.replacement, source: 'catalog' }] : list => list.filter(photo => photo.url !== stock));
+              if (json.same === false && json.replacement) setStockPhotoUrls([{ url: json.replacement, source: 'catalog' }]);
             }).catch(() => undefined);
           };
           reader.readAsDataURL(file);
