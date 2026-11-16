@@ -162,6 +162,7 @@ export function UnitEditDrawer({
   const [stockCandidates, setStockCandidates] = useState<StockCandidate[]>([]);
   const [msg, setMsg] = useState('');
   const [error, setError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [stockHistory, setStockHistory] = useState<StockMovement[]>([]);
   const [stockAddQty, setStockAddQty] = useState('1');
   const [convertQty, setConvertQty] = useState('2');
@@ -253,7 +254,7 @@ export function UnitEditDrawer({
     document.getElementById(`unit-edit-section-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setQuantityDraft(String(Math.max(1,Number(unit.qty_on_hand??1)||1)));setChannelSelections(null);setDnsPending(null);setDnlOn(listedDoNotList(unit));channelBaseline.current=null;upcEnrichment.current=null;setMsg(''); setError(''); setCurrentMissing(missingFields); setDescExpanded(false); setLocationPickerOpen(false); }, [sku]);
+  useEffect(() => { setForm(fromUnit(unit)); setStockAdjustQty(String(Number(unit.qty_on_hand ?? 1) || 0)); setQuantityDraft(String(Math.max(1,Number(unit.qty_on_hand??1)||1)));setChannelSelections(null);setDnsPending(null);setDnlOn(listedDoNotList(unit));channelBaseline.current=null;upcEnrichment.current=null;setMsg(''); setError(''); setConfirmDelete(false); setCurrentMissing(missingFields); setDescExpanded(false); setLocationPickerOpen(false); }, [sku]);
   useEffect(() => { setCurrentMissing(missingFields); }, [missingFields.join('|')]);
   useEffect(() => {
     let live = true;
@@ -513,19 +514,24 @@ export function UnitEditDrawer({
 
   async function removeUnit() {
     if (!canDelete) return;
-    if (!window.confirm(`Delete SKU ${sku} permanently?\n\nThis removes it from inventory. Items with any sales history cannot be deleted.`)) {
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      setError('');
       return;
     }
     setBusy(true);
     setError('');
     setMsg('');
     try {
+      const paths = orderedPhotos.map((p) => p.path).filter(Boolean);
+      if (paths.length) await client.storage.from('unit-photos').remove(paths);
       const { error: e } = await client.rpc('delete_unit', { p_sku: sku, p_approval_id: null });
       if (e) throw e;
       onDeleted?.();
       onClose();
     } catch (err) {
       setError(errText(err));
+      setConfirmDelete(false);
     } finally {
       setBusy(false);
     }
@@ -1143,7 +1149,10 @@ export function UnitEditDrawer({
         <div className="unit-edit-bottom-actions">
           {canDelete && unit.state === 'sold' && <RestoreInventoryButton client={client} sku={sku} onDone={() => { onSaved({ ...unit, state: 'available' }); onClose(); }} />}
           {canDelete && unsold && <DispositionButtons client={client} sku={sku} money={n => `$${(n / 100).toFixed(2)}`} stamp={s => new Date(s).toLocaleDateString()} className="secondary" presentation={appMode ? 'rows' : 'buttons'} onDone={() => { onReadinessChanged?.(); onDeleted?.(); onClose(); }} />}
-          {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>Delete item</button>}
+          {canDelete && confirmDelete && <p className="error" role="alert">Delete SKU {sku} from inventory? This cannot be undone.</p>}
+          {canDelete && error && <p className="error" role="alert">{error}</p>}
+          {canDelete && <button type="button" className="text-button danger unit-edit-delete" disabled={busy || lookupBusy} onClick={() => void removeUnit()}>{confirmDelete ? 'Delete permanently' : 'Delete item'}</button>}
+          {canDelete && confirmDelete && <button type="button" className="text-button" disabled={busy} onClick={() => setConfirmDelete(false)}>Cancel</button>}
         </div>
         {canDelete && <UnitDispositionHistory client={client} sku={sku} stamp={s => new Date(s).toLocaleString()} />}
 
