@@ -451,6 +451,19 @@ export async function findManifestLine(sb, storeId, raw) {
   return { ids, line: null, many: [] };
 }
 
+/** Photos already chosen for this manifest line. Receive shows these, so saving them is allowed. */
+export async function manifestStockPhotoUrls(sb, storeId, raw) {
+  const found = await findManifestLine(sb, storeId, raw);
+  if (!found.line) return [];
+  const key = String(found.line.lot_id || "").startsWith("TRA-")
+    ? `manifest_line_enrichment_${found.line.lot_id}`
+    : LOT_KEY;
+  const setting = await sb.from("store_settings").select("value").eq("store_id", storeId).eq("key", key).maybeSingle();
+  const book = setting.data?.value && typeof setting.data.value === "object" ? setting.data.value : {};
+  const entry = book[String(found.line.tcin || found.line.item_number || "")] || {};
+  return (entry.images || []).filter((url) => typeof url === "string" && /^https:\/\//i.test(url));
+}
+
 async function loadContext(sb, storeId, line) {
   const gtin = normalizeGtin(line.upc_normalized || line.upc_raw);
   const internal = isCostcoInternalCode(line.upc_raw) || isCostcoInternalCode(line.upc_normalized) || !gtin.ok;
