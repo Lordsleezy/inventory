@@ -13,6 +13,7 @@ import {
   cents,
   dollars,
   isBuyerKeeps,
+  isInStoreReturn,
   isReplacementReturn,
   laToday,
   returnAttentionNote,
@@ -39,7 +40,7 @@ type Props = {
 };
 
 const CHANNEL: Record<string, string> = {
-  website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
+  floor: 'In store', website: 'Website', ebay: 'eBay', amazon: 'Amazon', tiktok: 'TikTok', depop: 'Depop', mercari: 'Mercari',
 };
 
 function ebayRules(row: ReturnRow) {
@@ -360,26 +361,42 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
   async function resolveDelivered(defective: boolean) {
     if (!selected) return;
     const qty = Math.max(1, Math.trunc(Number(selected.requested_qty) || 1));
+    const sku = selected.sku;
+    const id = selected.id;
     setBusy('resolve');
+    setError('');
     const { error: e } = await client.rpc('portal_return_partial', {
-      p_return_id: selected.id,
+      p_return_id: id,
       p_qty: qty,
       p_defective: defective,
     });
     setBusy('');
     if (e) {
+      const err = e as { message?: string; details?: string; hint?: string };
+      const raw = `${err.message || ''} ${err.details || ''} ${err.hint || ''}`;
+      if (/return_qty_exceeds_sale/i.test(raw)) {
+        const { data } = await client.rpc('portal_return_desk', { p_filter: 'open', p_query: sku, p_from: null, p_to: laToday() });
+        const body = (data || {}) as { rows?: ReturnRow[] };
+        const still = body.rows?.find((r) => r.id === id);
+        if (!still) {
+          setScreen('list');
+          setSelected(null);
+          setError('');
+          await load();
+          return;
+        }
+      }
       setError(errText(e));
       return;
     }
+    setScreen('list');
+    setSelected(null);
     await load();
-    const { data } = await client.rpc('portal_return_desk', { p_filter: 'open', p_query: selected.sku, p_from: null, p_to: laToday() });
-    const body = (data || {}) as { rows?: ReturnRow[] };
-    const fresh = body.rows?.find((r) => r.id === selected.id);
-    if (fresh) setSelected(fresh);
   }
 
   const showDecide = selected && (
-    tracking?.status_line?.toLowerCase().includes('delivered')
+    isInStoreReturn(selected)
+    || tracking?.status_line?.toLowerCase().includes('delivered')
     || selected.status === 'received'
   ) && !['closed', 'canceled', 'dispositioned', 'refunded_no_return'].includes(selected.status);
 
@@ -536,7 +553,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
               <span>Refund</span>
               <input inputMode="decimal" value={refund} onChange={(e) => setRefund(e.target.value)} placeholder="0.00" />
             </label>
-            {!buyerKeeps && (
+            {!buyerKeeps && picked.channel !== 'floor' && (
               <>
                 <label className="returns-kv-row">
                   <span>Return label · Paid by us</span>
@@ -550,9 +567,11 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
             )}
           </div>
           <p className="returns-hint">
-            {buyerKeeps
-              ? 'No shipment. Owner profit drops by the refund; commissions do not.'
-              : 'Status updates on its own once tracking is added.'}
+            {picked.channel === 'floor'
+              ? 'In-store return. No shipment. The refund comes off this sale.'
+              : buyerKeeps
+                ? 'No shipment. Owner profit drops by the refund; commissions do not.'
+                : 'Status updates on its own once tracking is added.'}
           </p>
           <button type="button" className="returns-btn returns-btn-primary" disabled={!!busy} onClick={() => void submitNew()}>
             {busy ? 'Saving…' : buyerKeeps ? 'Save refund' : 'Start return'}
@@ -569,9 +588,10 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
 
   const detailBody = selected && (() => {
     const keeps = isBuyerKeeps(selected);
+    const inStore = isInStoreReturn(selected);
     const step = returnStepIndex(selected);
-    const canShip = !keeps && ['requested', 'label_sent', 'approved'].includes(selected.status);
-    const canReceive = !keeps && ['requested', 'label_sent', 'approved', 'in_transit'].includes(selected.status)
+    const canShip = !keeps && !inStore && ['requested', 'label_sent', 'approved'].includes(selected.status);
+    const canReceive = !keeps && !inStore && ['requested', 'label_sent', 'approved', 'in_transit'].includes(selected.status)
       && !['closed', 'canceled', 'received', 'dispositioned'].includes(selected.status);
     const showStatusActions = canShip || canReceive;
     const ebayOpen = selected.channel === 'ebay'
@@ -599,7 +619,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         </p>
         <h2 className="returns-detail-title">{returnListTitle(selected)}</h2>
 
-        {!keeps && (
+        {!keeps && !inStore && (
           <ol className="returns-steps" aria-label="Return progress">
             {RETURN_STEPS.map((s, i) => (
               <li key={s.id} className={i === step ? 'current' : i < step ? 'done' : ''}>
@@ -618,7 +638,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
             <span>{selected.refunded_at || selected.status === 'closed' ? 'Refunded' : 'Refund'}</span>
             <b>{selected.refund_cents > 0 ? money(selected.refund_cents) : '—'}</b>
           </div>
-          {!keeps && (
+          {!keeps && !inStore && (
             <div className="returns-kv-row">
               <span>
                 Return label
@@ -627,7 +647,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
               <b>{selected.return_label_cents > 0 ? money(selected.return_label_cents) : '—'}</b>
             </div>
           )}
-          {!keeps && (
+          {!keeps && !inStore && (
             <div className="returns-kv-row">
               <span>Tracking #</span>
               {trackingMissing ? (
@@ -644,9 +664,11 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         <p className="returns-hint">
           {isReplacementReturn(selected)
             ? 'Replacement shipping you paid hits expenses. Refund stays $0 unless you also refunded money.'
-            : keeps
-              ? 'Owner profit drops by the refund; commissions do not.'
-              : 'Refund comes from eBay. Owner profit drops by the refund; commissions don\'t. Status updates on its own once tracking is added.'}
+            : inStore
+              ? 'In-store return. The refund comes off this sale. Choose where the unit goes.'
+              : keeps
+                ? 'Owner profit drops by the refund; commissions do not.'
+                : 'Refund comes from eBay. Owner profit drops by the refund; commissions don\'t. Status updates on its own once tracking is added.'}
         </p>
 
         {showStatusActions && (
@@ -742,7 +764,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
 
         {showDecide && (
           <section className="returns-action-block">
-            <h3>Package delivered</h3>
+            <h3>{inStore ? 'Unit is here' : 'Package delivered'}</h3>
             <p className="returns-hint">Where does this unit go?</p>
             <div className="returns-action-row">
               <button type="button" className="returns-btn returns-btn-primary" disabled={!!busy} onClick={() => void resolveDelivered(false)}>

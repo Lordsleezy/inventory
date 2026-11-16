@@ -288,6 +288,7 @@ export function authErrorMessage(err: unknown): string {
   if (/violates foreign key constraint|foreign key/i.test(text)) {
     return "Couldn't delete this item because something is still linked to it. Refresh and try again.";
   }
+  if (/return_qty_exceeds_sale/i.test(text)) return "That sale was already returned.";
   if (/sku_not_found/i.test(text)) return "That item is no longer in inventory.";
   if (/quantity_must_be_1_to_100/i.test(text)) return "Quantity must be 1–100.";
   if (/dims_must_be_positive/i.test(text)) return "Dimensions and weight must be positive numbers (or blank).";

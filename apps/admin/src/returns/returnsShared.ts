@@ -52,6 +52,10 @@ export function isBuyerKeeps(row: Pick<ReturnRow, 'route_to' | 'status'>) {
   return row.route_to === 'buyer_keeps' || row.status === 'refunded_no_return';
 }
 
+export function isInStoreReturn(row: { channel?: string | null }) {
+  return row.channel === 'floor';
+}
+
 export function returnListTitle(row: ReturnRow) {
   return displayProductTitle({ title: row.title, fallback: `SKU ${row.sku}` });
 }
@@ -73,6 +77,7 @@ export function returnAttentionNote(row: ReturnRow): string | null {
     return null;
   }
   if (['closed', 'canceled', 'denied', 'dispositioned'].includes(row.status)) return null;
+  if (isInStoreReturn(row)) return 'Choose where it goes';
   if (!String(row.tracking_number || '').trim()) return 'No tracking';
   if (!(row.refund_cents > 0) && !row.refunded_at && !isReplacementReturn(row)) return 'Missing refund amount';
   return null;

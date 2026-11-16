@@ -41,6 +41,10 @@ test("authErrorMessage maps delete_unit guardrails", () => {
     /sales history/i,
   );
   assert.match(
+    authErrorMessage({ message: "return_qty_exceeds_sale" }),
+    /already returned/i,
+  );
+  assert.match(
     authErrorMessage({ message: "unit_still_listed:ebay" }),
     /still listed on eBay/i,
   );
