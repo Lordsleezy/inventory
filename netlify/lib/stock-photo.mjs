@@ -35,6 +35,6 @@ export function keepStockPhoto(row) {
   if (source === "ebay_catalog") return /(^|\.)ebayimg\.com$/i.test(host);
   if (stockPhotoVerdict(url) === "seller") return false;
   if (source === "manufacturer") return true;
-  if (source === "costco") return /costco|scene7/i.test(`${host} ${url}`);
+  if (source === "costco" || /costco|scene7/i.test(`${host} ${url}`)) return /costco|scene7/i.test(`${host} ${url}`);
   return stockPhotoVerdict(url) === "amazon";
 }

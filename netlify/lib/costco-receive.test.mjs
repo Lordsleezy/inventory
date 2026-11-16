@@ -309,4 +309,5 @@ test("Costco's own photo is kept and another seller's photo is not", () => {
   assert.equal(keepStockPhoto({ url: "https://i.ebayimg.com/images/g/seller.jpg", source: "costco" }), false);
   assert.equal(keepStockPhoto("https://i5.walmartimages.com/asr/jerky.jpeg"), false);
   assert.equal(keepStockPhoto({ url: "https://m.media-amazon.com/images/I/a.jpg", source: "amazon" }), true);
+  assert.equal(keepStockPhoto("https://gdx-assets.costco.com/adobe/assets/urn:aaid:aem:abc/as/photo.avif?width=727"), true);
 });

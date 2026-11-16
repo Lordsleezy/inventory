@@ -24,7 +24,7 @@ import {
   saveFloorProduct,
 } from "../lib/floor-products.mjs";
 import { judgeStockPhoto, keepStockJudgment, sameProductPhotos } from "../lib/stock-photo-verify.mjs";
-import { rejectManifestStockPhoto } from "../lib/costco-receive.mjs";
+import { manifestStockPhotoUrls, rejectManifestStockPhoto } from "../lib/costco-receive.mjs";
 import { costcoByItemNumber, costcoByItemSearch } from "../lib/costco-lookup.mjs";
 const receiveModel = () => process.env.GEMINI_RECEIVE_MODEL || 'gemini-3.5-flash-lite';
 const retailModel = () => process.env.GEMINI_RETAIL_MODEL || 'gemini-3.1-flash-lite-preview';
@@ -226,7 +226,8 @@ export async function invoke(event) {
       ctx.sb.from('upc_lookup_cache').select('payload').eq('gtin14', gtin.gtin14).maybeSingle(),
     ]);
     const payload = cached.data?.payload || {};
-    const storedUrl = catalogPhotoUrls(product.data, payload).find(url => sameCatalogPhoto(url, photoUrl));
+    const manifestUrls = await manifestStockPhotoUrls(ctx.sb, ctx.storeId, body.upc).catch(() => []);
+    const storedUrl = [...catalogPhotoUrls(product.data, payload), ...manifestUrls].find(url => sameCatalogPhoto(url, photoUrl));
     if (!storedUrl) {
       await floorLog({ level: 'warn', event: 'receive_photo.stock_stage_failed', storeId: ctx.storeId,
         message: 'catalog_photo_mismatch' });
