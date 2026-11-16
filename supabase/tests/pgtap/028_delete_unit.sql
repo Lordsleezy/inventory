@@ -35,5 +35,11 @@ insert into public.listings(store_id,sku,channel,status,listed_at)
   values(current_setting('tools.store')::uuid,'95003','ebay','listed',now());
 select throws_ok($$select public.delete_unit('95003',null)$$,'P0001','unit_still_listed:ebay','live listing blocks delete');
 
+insert into public.sku_ledger(sku,store_id,issued_at) values('95004',current_setting('tools.store')::uuid,now());
+insert into public.units(sku,store_id,title,brand,state,qty_on_hand,show_on_website,listed_on,received_at,updated_at)
+  values('95004',current_setting('tools.store')::uuid,'On the site','Acme','available',1,true,'{}'::text[],now(),now());
+select lives_ok($$select public.delete_unit('95004',null)$$,'showing on the store website does not block delete');
+select is((select count(*)::int from public.units where sku='95004'),0,'website item is removed');
+
 select * from finish();
 rollback;
