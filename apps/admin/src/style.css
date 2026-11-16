@@ -1170,6 +1170,7 @@ html.app-mode .aspect-suggested{color:#30d158;background:rgba(48,209,88,.18)}
 .returns-root-desktop .returns-btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:8px 14px;border:1px solid #c5ccd6;border-radius:10px;background:#fff;color:#111;font-size:15px;font-weight:500}
 .returns-root-desktop .returns-btn-primary{border-color:#111;font-weight:700}
 .returns-root-desktop .returns-action-row{display:flex;flex-wrap:wrap;gap:10px}
+.returns-root-desktop .returns-field-row{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:14px 0}
 .returns-root-desktop .returns-action-block{display:grid;gap:10px;margin-top:8px}
 .returns-root-desktop .returns-action-block h3{margin:0;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:#617182}
 .returns-root-desktop .returns-detail-title{font-size:22px;font-weight:700;margin:0;line-height:1.25}

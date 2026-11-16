@@ -348,6 +348,16 @@ html.desk:not(.app-mode) .returns-root-desktop .returns-search {
   background: #000;
   border-color: #4a4a4a;
 }
+html.desk:not(.app-mode) .returns-root-desktop .returns-field-row,
+html.desk:not(.app-mode) .returns-root-desktop .returns-field-row span {
+  color: #fff;
+  background: transparent;
+  border: 0;
+}
+html.desk:not(.app-mode) .returns-root-desktop .returns-btn-primary {
+  border-color: #fff;
+  font-weight: 700;
+}
 html.desk:not(.app-mode) .returns-root-desktop .returns-tabs button { color: #a0a0a0; background: transparent; }
 html.desk:not(.app-mode) .returns-root-desktop .returns-tabs button.active { color: #fff; border-bottom-color: #fff; }
 html.desk:not(.app-mode) .returns-root-desktop .returns-attention,

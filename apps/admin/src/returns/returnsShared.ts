@@ -33,6 +33,8 @@ export type ReturnRow = {
   replacement_id?: string | null;
   sale_id?: number | null;
   route_to?: string;
+  in_person?: boolean | null;
+  raw?: { in_person?: boolean } | null;
   created_at: string;
   label_sent_at?: string | null;
   in_transit_at?: string | null;
@@ -52,7 +54,16 @@ export function isBuyerKeeps(row: Pick<ReturnRow, 'route_to' | 'status'>) {
   return row.route_to === 'buyer_keeps' || row.status === 'refunded_no_return';
 }
 
-export function isInStoreReturn(row: { channel?: string | null }) {
+export function labeledInPerson(row: { in_person?: boolean | null; raw?: { in_person?: boolean } | null }): boolean | null {
+  if (typeof row.in_person === 'boolean') return row.in_person;
+  if (row.raw && typeof row.raw.in_person === 'boolean') return row.raw.in_person;
+  return null;
+}
+
+export function isInStoreReturn(row: { channel?: string | null; in_person?: boolean | null; raw?: { in_person?: boolean } | null }) {
+  const flag = labeledInPerson(row);
+  if (flag === true) return true;
+  if (flag === false) return false;
   return row.channel === 'floor';
 }
 
@@ -62,6 +73,7 @@ export function returnListTitle(row: ReturnRow) {
 
 export function returnListSubtitle(row: ReturnRow, channelLabel: string, reasonLabel?: string) {
   const bits = [`SKU ${row.sku}`, channelLabel];
+  if (isInStoreReturn(row)) bits.push('In person');
   if (isReplacementReturn(row)) {
     if (row.replacement_sku) bits.push(`sent ${row.replacement_sku}`);
   } else if (reasonLabel) {
