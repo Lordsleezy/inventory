@@ -132,7 +132,7 @@ export function ReceiveWizard({
     if (step === 'confirm' && delta < 0) { onClear(); return; }
     if (delta > 0 && step === 'brand' && !form.brand.trim()) return;
     if (delta > 0 && step === 'title' && !form.title.trim()) return;
-    if (delta > 0 && step === 'dims' && ![form.productDepth, form.productWidth, form.productHeight, form.productWeight].every(value => Number(value) > 0)) return;
+    if (delta > 0 && step === 'dims' && ![form.length, form.width, form.height, form.weight].every(value => Number(value) > 0)) return;
     const next = adjacentReceiveStep(plan, step as ReceiveStepId, delta > 0 ? 1 : -1);
     if (next) setStep(next);
   }
