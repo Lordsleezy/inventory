@@ -14,6 +14,7 @@ import {
   dollars,
   isBuyerKeeps,
   isInStoreReturn,
+  labeledInPerson,
   isReplacementReturn,
   laToday,
   returnAttentionNote,
@@ -79,6 +80,8 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
   const [pickedSale, setPickedSale] = useState<number | null>(null);
   const [pickQty, setPickQty] = useState('1');
   const [buyerKeeps, setBuyerKeeps] = useState(false);
+  const [inPerson, setInPerson] = useState(false);
+  const [editInPerson, setEditInPerson] = useState(false);
   const [refund, setRefund] = useState('');
   const [labelCost, setLabelCost] = useState('');
   const [trackingNo, setTrackingNo] = useState('');
@@ -204,6 +207,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
     setCandidates(null);
     setPickedSale(null);
     setBuyerKeeps(false);
+    setInPerson(false);
     setRefund('');
     setLabelCost('');
     setTrackingNo('');
@@ -218,15 +222,16 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
     const qty = Math.max(1, Math.trunc(Number(pickQty) || 1));
     setBusy('save');
     setError('');
+    const handedOver = !buyerKeeps && inPerson;
     const { data, error: e } = await client.rpc('portal_start_returns', {
-      p_lines: [{ sale_id: picked.sale_id, qty }],
-      p_label_cents: buyerKeeps ? 0 : cents(labelCost),
+      p_lines: [{ sale_id: picked.sale_id, qty, in_person: handedOver }],
+      p_label_cents: buyerKeeps || handedOver ? 0 : cents(labelCost),
       p_label_paid_by: 'seller',
       p_note: null,
       p_reason: 'other',
       p_no_shipment: buyerKeeps,
       p_refund_cents: cents(refund),
-      p_tracking_number: buyerKeeps ? null : trackingNo.trim() || null,
+      p_tracking_number: buyerKeeps || handedOver ? null : trackingNo.trim() || null,
     });
     setBusy('');
     if (e) {
@@ -246,6 +251,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
   function openDetail(r: ReturnRow) {
     setSelected(r);
     setEditKeeps(isBuyerKeeps(r));
+    setEditInPerson(isInStoreReturn(r));
     setEditRefund(r.refund_cents ? dollars(r.refund_cents) : '');
     setEditLabel(r.return_label_cents ? dollars(r.return_label_cents) : '');
     setEditTracking(r.tracking_number || '');
@@ -256,6 +262,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
   function openEdit() {
     if (!selected) return;
     setEditKeeps(isBuyerKeeps(selected));
+    setEditInPerson(isInStoreReturn(selected));
     setEditRefund(selected.refund_cents ? dollars(selected.refund_cents) : '');
     setEditLabel(selected.return_label_cents ? dollars(selected.return_label_cents) : '');
     setEditTracking(selected.tracking_number || '');
@@ -271,9 +278,10 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
       p_return: selected.id,
       p_patch: {
         buyer_keeps: editKeeps,
+        in_person: !editKeeps && editInPerson,
         refund_cents: cents(editRefund),
-        return_label_cents: cents(editLabel),
-        tracking_number: editTracking.trim() || null,
+        return_label_cents: editKeeps || editInPerson ? 0 : cents(editLabel),
+        tracking_number: editKeeps || editInPerson ? null : editTracking.trim() || null,
         requested_qty: Math.max(1, Math.trunc(Number(editQty) || 1)),
       },
     });
@@ -284,9 +292,30 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
     }
     const row = data as ReturnRow;
     setSelected(row);
+    setEditInPerson(isInStoreReturn(row));
     setScreen('detail');
     await load();
     void loadTracking(row.id);
+  }
+
+  async function labelInPerson(next: boolean) {
+    if (!selected || isBuyerKeeps(selected)) return;
+    if (labeledInPerson(selected) === next) return;
+    setBusy('label');
+    setError('');
+    const { data, error: e } = await client.rpc('portal_return_edit', {
+      p_return: selected.id,
+      p_patch: { in_person: next },
+    });
+    setBusy('');
+    if (e) {
+      setError(errText(e));
+      return;
+    }
+    const row = data as ReturnRow;
+    setSelected(row);
+    setEditInPerson(isInStoreReturn(row));
+    await load();
   }
 
   async function cancelReturn() {
@@ -518,6 +547,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
                 onClick={() => {
                   setPickedSale(c.sale_id);
                   setPickQty(String(max));
+                  setInPerson(c.channel === 'floor');
                   if (c.hint_refund_cents) setRefund(dollars(c.hint_refund_cents));
                   else if (!refund && c.price_cents) setRefund(dollars(c.price_cents));
                   if (c.hint_tracking) setTrackingNo(c.hint_tracking);
@@ -548,12 +578,21 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
               <button type="button" className={buyerKeeps ? 'active' : ''} onClick={() => setBuyerKeeps(true)}>Buyer keeps</button>
             </div>
           </div>
+          {!buyerKeeps && (
+            <div className="returns-field-row">
+              <span>Label</span>
+              <div className="returns-action-row">
+                <button type="button" className={`returns-btn${!inPerson ? ' returns-btn-primary' : ''}`} onClick={() => setInPerson(false)}>Shipped</button>
+                <button type="button" className={`returns-btn${inPerson ? ' returns-btn-primary' : ''}`} onClick={() => setInPerson(true)}>In person</button>
+              </div>
+            </div>
+          )}
           <div className="returns-kv-list">
             <label className="returns-kv-row">
               <span>Refund</span>
               <input inputMode="decimal" value={refund} onChange={(e) => setRefund(e.target.value)} placeholder="0.00" />
             </label>
-            {!buyerKeeps && picked.channel !== 'floor' && (
+            {!buyerKeeps && !inPerson && (
               <>
                 <label className="returns-kv-row">
                   <span>Return label · Paid by us</span>
@@ -567,8 +606,8 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
             )}
           </div>
           <p className="returns-hint">
-            {picked.channel === 'floor'
-              ? 'In-store return. No shipment. The refund comes off this sale.'
+            {!buyerKeeps && inPerson
+              ? 'In person. The unit is here. No shipment.'
               : buyerKeeps
                 ? 'No shipment. Owner profit drops by the refund; commissions do not.'
                 : 'Status updates on its own once tracking is added.'}
@@ -613,11 +652,21 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
         {error && <div className="app-inline-error" role="alert">{error}</div>}
         <p className="returns-meta">
           SKU {selected.sku} · {CHANNEL[selected.channel] || selected.channel}
+          {inStore ? ' · In person' : ''}
           {isReplacementReturn(selected)
             ? (selected.replacement_sku ? ` · sent ${selected.replacement_sku}` : ' · replacement')
             : (reasonForRow(selected) ? ` · ${reasonForRow(selected)}` : '')}
         </p>
         <h2 className="returns-detail-title">{returnListTitle(selected)}</h2>
+        {!keeps && (
+          <div className="returns-field-row">
+            <span>Label</span>
+            <div className="returns-action-row">
+              <button type="button" className={`returns-btn${!inStore ? ' returns-btn-primary' : ''}`} disabled={!!busy} onClick={() => void labelInPerson(false)}>Shipped</button>
+              <button type="button" className={`returns-btn${inStore ? ' returns-btn-primary' : ''}`} disabled={!!busy} onClick={() => void labelInPerson(true)}>In person</button>
+            </div>
+          </div>
+        )}
 
         {!keeps && !inStore && (
           <ol className="returns-steps" aria-label="Return progress">
@@ -810,12 +859,21 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
           <button type="button" className={editKeeps ? 'active' : ''} onClick={() => setEditKeeps(true)}>Buyer keeps</button>
         </div>
       </div>
+      {!editKeeps && (
+        <div className="returns-field-row">
+          <span>Label</span>
+          <div className="returns-action-row">
+            <button type="button" className={`returns-btn${!editInPerson ? ' returns-btn-primary' : ''}`} onClick={() => setEditInPerson(false)}>Shipped</button>
+            <button type="button" className={`returns-btn${editInPerson ? ' returns-btn-primary' : ''}`} onClick={() => setEditInPerson(true)}>In person</button>
+          </div>
+        </div>
+      )}
       <div className="returns-kv-list">
         <label className="returns-kv-row">
           <span>Refund</span>
           <input inputMode="decimal" value={editRefund} onChange={(e) => setEditRefund(e.target.value)} />
         </label>
-        {!editKeeps && (
+        {!editKeeps && !editInPerson && (
           <>
             <label className="returns-kv-row">
               <span>Return label · Paid by us</span>
