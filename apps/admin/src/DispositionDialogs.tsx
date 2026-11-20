@@ -34,11 +34,13 @@ function ReplacementDialog({ client, sku, money, stamp, onClose, onDone }: {
   const [sale, setSale] = useState<SaleHit | null>(null);
   const [bad, setBad] = useState<'yes' | 'not_now' | ''>('');
   const [extra, setExtra] = useState('');
+  const [tracking, setTracking] = useState('');
   const [note, setNote] = useState('');
+  const [labelFile, setLabelFile] = useState<File | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<{ cost_missing: boolean; bad_unit_sku: string | null } | null>(null);
+  const [result, setResult] = useState<{ id?: string; cost_missing: boolean; bad_unit_sku: string | null } | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -52,15 +54,37 @@ function ReplacementDialog({ client, sku, money, stamp, onClose, onDone }: {
   }, [client, query]);
 
   const extraCents = parseDollars(extra);
+  function composedNote() {
+    const bits = [
+      note.trim(),
+      tracking.trim() ? `Tracking ${tracking.trim()}` : '',
+      labelFile ? `Label file ${labelFile.name}` : '',
+    ].filter(Boolean);
+    return bits.join(' · ') || null;
+  }
   async function record() {
     if (!sale || !bad || extraCents == null) return;
     setBusy(true); setError('');
     try {
       const { data, error: e } = await client.rpc('portal_record_replacement', {
-        p_sku: sku, p_sale_id: sale.sale_id, p_bad_unit_returned: bad === 'yes', p_extra_cost_cents: extraCents, p_note: note.trim() || null,
+        p_sku: sku, p_sale_id: sale.sale_id, p_bad_unit_returned: bad === 'yes', p_extra_cost_cents: extraCents, p_note: composedNote(),
       });
       if (e) throw e;
-      setResult(data as { cost_missing: boolean; bad_unit_sku: string | null });
+      const row = data as { id?: string; cost_missing: boolean; bad_unit_sku: string | null };
+      if (labelFile && row.id) {
+        const { data: unitRow } = await client.from('units').select('store_id').eq('sku', sku).limit(1).maybeSingle();
+        const storeId = unitRow?.store_id as string | undefined;
+        if (storeId) {
+          const safe = labelFile.name.replace(/[^\w.\-]+/g, '_').slice(0, 80) || 'label.pdf';
+          const path = `${storeId}/replacements/${sku}/${row.id}-${safe}`;
+          const { error: upErr } = await client.storage.from('order-labels').upload(path, labelFile, {
+            contentType: labelFile.type || 'application/pdf',
+            upsert: false,
+          });
+          if (upErr) setError(`Replacement saved, but label upload failed: ${upErr.message}`);
+        }
+      }
+      setResult(row);
     } catch (e) { setError(errText(e)); } finally { setBusy(false); }
   }
 
@@ -68,7 +92,7 @@ function ReplacementDialog({ client, sku, money, stamp, onClose, onDone }: {
     <h2>Replacement · SKU {sku}</h2>
     {error && <div className="alert" role="alert">{error}</div>}
     {result ? <>
-      <p>Recorded. SKU {sku} left stock and is being delisted everywhere. It is not a sale: no revenue, no sales tax.</p>
+      <p>Recorded. SKU {sku} left stock and is being delisted everywhere. It is not a sale: no revenue, no sales tax. It shows under Returns → Replacements.</p>
       {result.bad_unit_sku && <p>The bad unit is in Defective as SKU {result.bad_unit_sku}.</p>}
       {result.cost_missing && <p className="hint">This unit has no cost entered yet, so that sale&apos;s payout waits until you enter one.</p>}
       <div className="actions"><button type="button" onClick={onDone}>Done</button></div>
@@ -88,13 +112,18 @@ function ReplacementDialog({ client, sku, money, stamp, onClose, onDone }: {
         <label className="inventory-check"><input type="radio" name="bad" checked={bad === 'yes'} onChange={() => setBad('yes')} /> Yes (goes into Defective now)</label>
         <label className="inventory-check"><input type="radio" name="bad" checked={bad === 'not_now'} onChange={() => setBad('not_now')} /> Not now (add it later with &quot;Bad unit came back&quot;)</label>
       </fieldset>
-      <label>Extra cost of the replacement, optional ($, e.g. the shipping label)<input inputMode="decimal" value={extra} onChange={e => setExtra(e.target.value)} placeholder="0.00" /></label>
+      <label>Shipping label (PDF or photo)<input type="file" accept="application/pdf,image/*" onChange={e => setLabelFile(e.target.files?.[0] || null)} /></label>
+      {labelFile && <p className="hint">{labelFile.name}</p>}
+      <label>Label cost · Paid by us ($)<input inputMode="decimal" value={extra} onChange={e => setExtra(e.target.value)} placeholder="0.00" /></label>
+      <label>Tracking #<input value={tracking} onChange={e => setTracking(e.target.value)} placeholder="9400…" /></label>
       <label>Note, optional<input value={note} onChange={e => setNote(e.target.value)} /></label>
-      {extraCents == null && <p className="error" role="alert">Enter the extra cost as dollars, like 6.50.</p>}
+      {extraCents == null && <p className="error" role="alert">Enter the label cost as dollars, like 6.50.</p>}
       <div className="actions"><button type="button" disabled={!bad || extraCents == null} onClick={() => setConfirming(true)}>Review</button><button type="button" className="secondary" onClick={onClose}>Cancel</button></div>
     </> : <>
-      <p>SKU {sku} leaves stock and is delisted from every channel. It is not a sale. Its cost{extraCents ? ` plus ${money(extraCents)} extra` : ''} comes off the profit of sale #{sale.receipt_no}, and that sale&apos;s commission is recalculated.</p>
+      <p>SKU {sku} leaves stock and is delisted from every channel. It is not a sale. Its cost{extraCents ? ` plus ${money(extraCents)} label` : ''} comes off the profit of sale #{sale.receipt_no}, and that sale&apos;s commission is recalculated.</p>
       <p>Bad unit: {bad === 'yes' ? 'coming back, goes into Defective now.' : 'not back yet.'}</p>
+      {labelFile && <p>Label file: {labelFile.name}</p>}
+      {tracking.trim() && <p>Tracking: {tracking.trim()}</p>}
       <div className="actions"><button type="button" disabled={busy} onClick={() => void record()}>{busy ? 'Recording…' : 'Confirm replacement'}</button><button type="button" className="secondary" disabled={busy} onClick={() => setConfirming(false)}>Back</button></div>
     </>}
   </div></div>;

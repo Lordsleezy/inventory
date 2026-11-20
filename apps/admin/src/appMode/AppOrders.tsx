@@ -34,6 +34,7 @@ import {
   listShipments,
   suggestBundleGroups,
 } from '../orderShipments';
+import { AppOrdersReplacement } from './AppOrdersReplacement';
 
 type Seg = 'verifyWeight' | 'needsLabel' | 'toShip' | 'packaged' | 'shipped' | 'delivered' | 'canceled';
 
@@ -92,9 +93,21 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [expandedIds, setExpandedIds] = useState<string[]>([]);
   const [shipToDraft, setShipToDraft] = useState<ShipToDraft>(() => emptyShipTo());
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [replacementOpen, setReplacementOpen] = useState(false);
   const packProofInput = useRef<HTMLInputElement>(null);
   const labelInput = useRef<HTMLInputElement>(null);
   const tabRowRef = useRef<HTMLDivElement>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    function onDoc(e: MouseEvent) {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) setAddMenuOpen(false);
+    }
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [addMenuOpen]);
 
   const load = useCallback(async () => {
     try {
@@ -798,10 +811,52 @@ export function AppOrders({ client, storeId, accessToken, money, stamp, isAdmin 
   if (scanOut) {
     return <ScanOutPanel client={client} storeId={storeId} stamp={stamp} appMode onClose={() => setScanOut(false)} />;
   }
+  if (replacementOpen && isAdmin) {
+    return (
+      <AppOrdersReplacement
+        client={client}
+        storeId={storeId}
+        money={money}
+        stamp={stamp}
+        onClose={() => setReplacementOpen(false)}
+        onDone={() => { setReplacementOpen(false); void load(); }}
+      />
+    );
+  }
+
   return (
     <>
       <div className="orders-sticky-head">
-      <p className="orders-screen-eyebrow">Orders · {SEG_SHORT[seg]}</p>
+      <div className="orders-screen-eyebrow-row">
+        <p className="orders-screen-eyebrow">Orders · {SEG_SHORT[seg]}</p>
+        {isAdmin && (
+          <div className="orders-add-menu" ref={addMenuRef}>
+            <button
+              type="button"
+              className="orders-add-plus"
+              aria-label="Add"
+              aria-expanded={addMenuOpen}
+              onClick={() => setAddMenuOpen((o) => !o)}
+            >
+              +
+            </button>
+            {addMenuOpen && (
+              <div className="app-order-nav-pop orders-add-pop" role="menu">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    setReplacementOpen(true);
+                  }}
+                >
+                  Replacement
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
       <div className="app-segment app-segment-scroll orders-segment" role="tablist" ref={tabRowRef}>
         {((isAdmin ? [
           ['verifyWeight', 'Verify weight', shipmentBuckets.verifyWeight.length],
