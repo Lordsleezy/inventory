@@ -21,7 +21,10 @@ test('Orders screens no longer mount proposed-refund / Apply bundle price chrome
 
 test('phone Orders heading is solid white, not gray', async () => {
   const css = await readFile(path.join(root, 'appMode/ordersApp.css'), 'utf8');
-  const block = css.slice(css.indexOf('.orders-screen-eyebrow'), css.indexOf('.orders-screen-eyebrow') + 280);
+  // Match the eyebrow rule itself, not .orders-screen-eyebrow-row.
+  const start = css.indexOf('.orders-screen-eyebrow {');
+  assert.ok(start >= 0, 'orders-screen-eyebrow rule missing');
+  const block = css.slice(start, start + 320);
   assert.match(block, /color:\s*#fff/);
   assert.doesNotMatch(block, /color:\s*#9a9a9a/);
 });
