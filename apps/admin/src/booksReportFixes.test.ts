@@ -96,7 +96,8 @@ test('a 500 dollar bonus given partly to someone else shows what is left', () =>
   );
   const byPerson = new Map(lines.map((line) => [line.person, line]));
   assert.equal(byPerson.get('Paul')?.cents, 40000);
-  assert.equal(byPerson.get('Jacob')?.cents, 20000);
+  assert.equal(byPerson.get('Jacob')?.cents, 10000);
+  assert.equal(lines.reduce((sum, line) => sum + line.cents, 0), 50000);
   assert.match(byPerson.get('Paul')?.note || '', /Was \$500\.00/);
   assert.match(byPerson.get('Paul')?.note || '', /Jacob/);
 });
