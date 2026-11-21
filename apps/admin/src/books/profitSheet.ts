@@ -65,6 +65,15 @@ function dollars(cents: number) {
   return `${sign}$${(Math.abs(cents) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+/** This month's net after its own expenses. Earlier losses are not included. */
+export function netAfterOwnExpenses(wb: BooksWorkbook): number {
+  const line = profitStatement({
+    ...wb,
+    expenses: { ...wb.expenses, carried_loss_cents: 0 },
+  }).find((row) => row.label === 'Net after expenses');
+  return line?.cents || 0;
+}
+
 export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   const sales = wb.sales?.rows || [];
   const returns = wb.inventory?.returns || [];
@@ -115,7 +124,8 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     : sum(sales, (row) => row.cost_cents == null ? 0 : (row.commission_cents || 0));
   const commission = saleCommission;
   const ownerProfit = salesProfit - commission - bonusPay;
-  const totalExpenses = other + returnShip + givenAway + replacements;
+  const carriedLoss = Math.max(0, Number(wb.expenses?.carried_loss_cents || 0));
+  const totalExpenses = other + returnShip + givenAway + replacements + carriedLoss;
   const netAfterExpenses = ownerProfit - totalExpenses;
   const lines: ProfitLine[] = [
     {
@@ -220,7 +230,9 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   }
   const expenseParts = [
     other ? `${dollars(other)} entered as expenses` : '',
-    carried ? `${dollars(carried)} of that is still unpaid from an earlier month` : 'Nothing from an earlier month is still unpaid',
+    carriedLoss ? `${dollars(carriedLoss)} is the net loss from earlier months that later profit has not covered` : '',
+    carried ? `${dollars(carried)} of the expenses on the Expenses tab is still unpaid from an earlier month` : '',
+    !carriedLoss && !carried ? 'Nothing from an earlier month is still unpaid' : '',
     returnShip ? `${dollars(returnShip)} return shipping` : '',
     givenAway ? `${dollars(givenAway)} cost of items given away` : '',
     replacements ? `${dollars(replacements)} replacement cost` : '',

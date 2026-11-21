@@ -6,6 +6,30 @@ type CarryExpense = { id: string; at: string; amount: number; employee_id: strin
 type CarryPayment = { at: string; amount: number; employee_id: string; note?: string | null };
 
 /**
+ * Net loss from earlier months that later profit has not covered.
+ * Nets are that month alone, oldest first. A profit month pays the loss down.
+ * A surplus does not become a credit in the next month.
+ * The result is positive cents still unpaid.
+ */
+export function carriedLossCents(earlierNets: number[]): number {
+  let running = 0;
+  for (const net of earlierNets) {
+    running += Number(net) || 0;
+    if (running > 0) running = 0;
+  }
+  return running < 0 ? -running : 0;
+}
+
+export function workbookWithCarriedLoss<T extends { expenses: { carried_loss_cents?: number } }>(
+  workbook: T,
+  earlierNets: number[],
+): T {
+  const loss = carriedLossCents(earlierNets);
+  if (!loss) return workbook;
+  return { ...workbook, expenses: { ...workbook.expenses, carried_loss_cents: loss } };
+}
+
+/**
  * Reimbursements from before this period that payments through the period end have not covered.
  * A commission-tagged payment does not pay a reimbursement. Oldest expenses are paid first.
  */

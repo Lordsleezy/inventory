@@ -255,6 +255,8 @@ export type BooksWorkbook = {
     otherExpenses_cents: number;
     bonus_cents?: number;
     bonus_lines?: { person: string; cents: number; note: string }[];
+    /** Net loss from earlier months that later profit has not covered. Added to total expenses. */
+    carried_loss_cents?: number;
     duplicates: DuplicateNote[];
   };
   sales: { rows: SalesLine[]; channelTotals: { channel: string; revenue_cents: number; profit_cents: number; count: number }[]; totals: BookTotals };

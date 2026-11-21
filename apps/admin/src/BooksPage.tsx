@@ -19,7 +19,8 @@ import { buildBooksExcel, buildBooksPdf, downloadBytes } from './books/export';
 import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPayoutContext';
 import { computePayoutPersonBalances, loadPayoutLedgerData, BOOKS_WORKBOOK_VERSION, type PersonBalance } from './books/payoutLedger';
 import { canonicalPersonKey, mergeEmployeeIds } from './books/personMerge';
-import { attachCarryExpenses, attachPriorBonuses, loadPriorBonusExpenses, loadUnpaidCarryExpenses } from './books/carryExpenses';
+import { attachCarryExpenses, attachPriorBonuses, loadPriorBonusExpenses, loadUnpaidCarryExpenses, workbookWithCarriedLoss } from './books/carryExpenses';
+import { netAfterOwnExpenses } from './books/profitSheet';
 import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
 import type { BooksPayoutContext, InventorySummary, Period, ReceivedItem, Report, Row } from './books/types';
 import type { CommissionOverride } from './payouts';
@@ -86,6 +87,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   const [filing, setFiling] = useState<CdtfaFrequency | null>(null);
   const [archiveBusy, setArchiveBusy] = useState(false);
   const [parts, setParts] = useState<{ label: string; period: Period; report: Report; inventory: InventorySummary; received: ReceivedItem[]; money: Awaited<ReturnType<typeof loadBooksMoney>>; decisions: Record<string, 'keep' | 'remove'> }[]>([]);
+  const [earlierNets, setEarlierNets] = useState<number[]>([]);
   const [sheet, setSheet] = useState<'hub' | 'sales'>('hub');
   const [desktopTab, setDesktopTab] = useState<'hub' | 'sales'>('sales');
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -150,6 +152,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
     if (ids.paulId && !paulList.includes(ids.paulId)) paulList.push(ids.paulId);
     if (ids.jacobId && !jacobList.includes(ids.jacobId)) jacobList.push(ids.jacobId);
     setStaffPersonIds({ paulIds: paulList, jacobIds: jacobList });
+    return { ctx, ov };
   }, [client]);
 
   const loadSpan = useCallback(async (p: Period, nextSpan: BooksSpan, known: Period[]) => {
@@ -159,7 +162,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
       const bounds = spanBounds(p.period_start, nextSpan);
       const covered = known.filter((row) => row.period_start >= bounds.start && row.period_start <= bounds.end);
       const targets = (covered.length ? covered : [p]).slice().sort((a, b) => a.period_start.localeCompare(b.period_start));
-      if (storeId) await loadPayoutSide(storeId, targets[targets.length - 1].period_start);
+      const side = storeId ? await loadPayoutSide(storeId, targets[targets.length - 1].period_start) : null;
       const loaded = [];
       for (const month of targets) {
         const piece = await loadOneMonth(client, month);
@@ -173,7 +176,28 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const moneyMonth = await loadBooksMoney(client, month.period_start);
         loaded.push({ label: monthLabel(month.period_start), period: month, ...piece, money: moneyMonth, decisions });
       }
+      const earlierPeriods = known
+        .filter((row) => row.period_start < bounds.start)
+        .sort((a, b) => a.period_start.localeCompare(b.period_start));
+      const nets: number[] = [];
+      if (side) {
+        for (const month of earlierPeriods) {
+          const piece = await loadOneMonth(client, month);
+          const earlierBook = buildBooksWorkbook({
+            report: piece.report,
+            inventory: piece.inventory,
+            received: piece.received,
+            payoutCtx: side.ctx,
+            overrides: side.ov,
+            money: { overview: [], activityByAccount: {} },
+            duplicateHidden: new Set(),
+            duplicateDecisions: {},
+          });
+          nets.push(netAfterOwnExpenses(earlierBook));
+        }
+      }
       const anchor = loaded.find((row) => row.period.id === p.id) || loaded[loaded.length - 1];
+      setEarlierNets(nets);
       setParts(loaded);
       setReport(anchor.report);
       setInventory(anchor.inventory);
@@ -214,7 +238,11 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
     });
   }, [parts, payoutCtx, overrides, duplicateDecisions, ledgerBalances, staffPersonIds, costFlagSaleIds, selected?.id]);
   const slices = useMemo(() => (builtSlices.length > 1 ? builtSlices : []), [builtSlices]);
-  const workbook = useMemo(() => (builtSlices.length > 1 ? combineMonthWorkbooks(builtSlices) : builtSlices[0]?.workbook ?? null), [builtSlices]);
+  const workbook = useMemo(() => {
+    const base = builtSlices.length > 1 ? combineMonthWorkbooks(builtSlices) : builtSlices[0]?.workbook ?? null;
+    if (!base) return null;
+    return workbookWithCarriedLoss(base, earlierNets);
+  }, [builtSlices, earlierNets]);
 
   const totals = useMemo(() => workbook?.sales.totals ?? null, [workbook]);
 
@@ -366,6 +394,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
     setError('');
     try {
       const loaded = new Map<string, BooksSlice>();
+      const ownNets = new Map<string, number>();
       const storeId = await resolveStoreId();
       for (const month of periods) {
         const piece = await loadOneMonth(client, month);
@@ -378,23 +407,22 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const decisions = saved ? JSON.parse(saved) as Record<string, 'keep' | 'remove'> : {};
         const moneyMonth = await loadBooksMoney(client, month.period_start);
         const hidden = new Set(Object.entries(decisions).filter(([, value]) => value === 'remove').map(([key]) => key));
-        loaded.set(month.id, {
-          label: monthLabel(month.period_start),
-          workbook: buildBooksWorkbook({
-            report: piece.report,
-            inventory: piece.inventory,
-            received: piece.received,
-            payoutCtx,
-            overrides,
-            money: moneyMonth,
-            duplicateHidden: hidden,
-            duplicateDecisions: decisions,
-            ledgerBalances: ledgerBalances || undefined,
-            paulIds: staffPersonIds.paulIds,
-            jacobIds: staffPersonIds.jacobIds,
-            costFlagSaleIds,
-          }),
+        const builtMonth = buildBooksWorkbook({
+          report: piece.report,
+          inventory: piece.inventory,
+          received: piece.received,
+          payoutCtx,
+          overrides,
+          money: moneyMonth,
+          duplicateHidden: hidden,
+          duplicateDecisions: decisions,
+          ledgerBalances: ledgerBalances || undefined,
+          paulIds: staffPersonIds.paulIds,
+          jacobIds: staffPersonIds.jacobIds,
+          costFlagSaleIds,
         });
+        ownNets.set(month.id, netAfterOwnExpenses(builtMonth));
+        loaded.set(month.id, { label: monthLabel(month.period_start), workbook: builtMonth });
       }
       const template = await loadCdtfaTemplate();
       const files: { name: string; bytes: Uint8Array }[] = [];
@@ -419,7 +447,12 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
       downloadBytes('Books-all.zip', zipStore(files), 'application/zip');
 
       async function pack(item: ReturnType<typeof archivePlan>[number], slices: BooksSlice[], tax: CdtfaPrintModel) {
-        const workbook = slices.length > 1 ? combineMonthWorkbooks(slices) : slices[0].workbook;
+        const earlier = [...periods]
+          .filter((month) => month.period_start < item.start)
+          .sort((a, b) => a.period_start.localeCompare(b.period_start))
+          .map((month) => ownNets.get(month.id) || 0);
+        const combined = slices.length > 1 ? combineMonthWorkbooks(slices) : slices[0].workbook;
+        const workbook = workbookWithCarriedLoss(combined, earlier);
         const period = { ...item.months[item.months.length - 1], period_start: item.start, period_end: item.end };
         const built = await buildBooksPdf(period, workbook, money, {
           title: item.title,

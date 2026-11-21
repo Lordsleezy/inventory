@@ -496,6 +496,8 @@ function writeStartSheet(
   addReportTitle(ws, 'Business summary', periodLabel, generated, 3);
   const timing = reportTiming(period, generated, word);
   const lines = profitStatement(wb);
+  const carriedLoss = Math.max(0, Number(wb.expenses?.carried_loss_cents || 0));
+  const carriedLossText = `$${(carriedLoss / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const find = (label: string) => lines.find((line) => line.label === label);
   const costs = missingCostPicture(wb);
   const comm = commissionTie(wb);
@@ -541,8 +543,12 @@ function writeStartSheet(
     'Commissions': 'Commission Floor saved on these sales.',
     'Bonuses': find('Bonuses')?.note || 'Bonuses entered on Expenses. Not inside the commission line.',
     'Owner profit': 'Profit on sales minus commissions and bonuses. Expenses are not taken out of this.',
-    'Total expenses': 'Expenses this month, plus anything still unpaid from an earlier month. Not taken out of owner profit.',
-    'Net after expenses': 'Owner profit minus those expenses. Not cash in the bank.',
+    'Total expenses': carriedLoss
+      ? `Expenses this month, plus ${carriedLossText} still unpaid from earlier months. Not taken out of owner profit.`
+      : 'Expenses this month, plus anything still unpaid from an earlier month. Not taken out of owner profit.',
+    'Net after expenses': carriedLoss
+      ? `Owner profit minus this month's expenses and the ${carriedLossText} still unpaid from earlier months. Not cash in the bank.`
+      : 'Owner profit minus those expenses. Not cash in the bank.',
   };
   for (const step of bridge) {
     if (step.role === 'deduction' && !step.cents && step.label !== 'Bonuses') continue;
