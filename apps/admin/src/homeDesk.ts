@@ -6,7 +6,7 @@ import { canonicalPersonKey, mergeEmployeeIds, viewerIsJacob } from './books/per
 export { viewerIsJacob };
 import { computePayoutPersonBalances, loadPayoutLedgerData } from './books/payoutLedger';
 import type { InventorySummary, Period, ReceivedItem, Report } from './books/types';
-import { attachCarryExpenses, loadUnpaidCarryExpenses } from './books/carryExpenses';
+import { attachCarryExpenses, attachPriorBonuses, loadPriorBonusExpenses, loadUnpaidCarryExpenses } from './books/carryExpenses';
 import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
 import type { DeskPulse } from './deskPulse';
 import { floorFunctionUrl } from './floorApi';
@@ -72,11 +72,10 @@ async function booksIssues(client: SupabaseClient, storeId: string) {
   ]);
   const inventory = { ...emptyInventory(), ...((invRes.data || {}) as InventorySummary) };
   const received = (recRes.data || []) as ReceivedItem[];
+  const baseReport = { ...normalizeReport(reportRes.data as Report), inventory_summary: inventory, items_received: received };
   const carry = await loadUnpaidCarryExpenses(client, storeId, current.period_start, current.period_end);
-  const report = attachCarryExpenses(
-    { ...normalizeReport(reportRes.data as Report), inventory_summary: inventory, items_received: received },
-    carry,
-  );
+  const priorBonuses = await loadPriorBonusExpenses(client, storeId, current.period_start, baseReport.adjustments || []);
+  const report = attachPriorBonuses(attachCarryExpenses(baseReport, carry), priorBonuses);
   const ledgerRaw = await loadPayoutLedgerData(client, storeId, overrides);
   const balances = computePayoutPersonBalances({
     staff: ctx.staff,

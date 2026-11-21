@@ -104,7 +104,10 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     .filter((row) => row.carried && !row.excludeFromTotals)
     .reduce((sum, row) => sum + row.amount_cents, 0);
   const bonusRows = (wb.expenses?.rows || []).filter((row) => !row.excludeFromTotals && String(row.category || '').toLowerCase() === 'bonus');
-  const bonusPay = bonusRows.length ? bonusRows.reduce((sum, row) => sum + row.amount_cents, 0) : bonus;
+  const bonusDetail = wb.expenses?.bonus_lines || [];
+  const bonusPay = bonusDetail.length
+    ? bonusDetail.reduce((sum, row) => sum + row.cents, 0)
+    : (bonusRows.length ? bonusRows.reduce((sum, row) => sum + row.amount_cents, 0) : bonus);
   const staffRows = (wb.payouts?.commissions || []).filter((row) => row.role === 'staff');
   // Floor's number: the commission saved on each sale for Paul and Jacob, plus bonuses entered on Expenses.
   const saleCommission = staffRows.length
@@ -198,9 +201,11 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     {
       label: 'Bonuses',
       cents: bonusPay,
-      note: bonusRows.length
-        ? bonusRows.map((row) => `${row.date ? `${row.date} ` : ''}${row.title} ${dollars(row.amount_cents)}`).join('; ') + '. Entered on Expenses. Not inside the commission line above.'
-        : (bonusPay ? `${dollars(bonusPay)} entered on Expenses. Not inside the commission line above.` : 'No bonus entered this month.'),
+      note: bonusDetail.length
+        ? bonusDetail.map((row) => row.note).join(' ')
+        : (bonusRows.length
+          ? bonusRows.map((row) => `${row.date ? `${row.date} ` : ''}${row.title} ${dollars(row.amount_cents)}`).join('; ') + '. Entered on Expenses. Not inside the commission line above.'
+          : (bonusPay ? `${dollars(bonusPay)} entered on Expenses. Not inside the commission line above.` : 'No bonus entered this month.')),
       role: 'deduction',
     },
   );

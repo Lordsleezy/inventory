@@ -10,6 +10,8 @@ import { listFlaggedDefaultCostSales, listTrulyMissingCostSales } from './costTr
 import { saleWhyText } from './saleNotes';
 import { manifestedItemCount } from './receivedSummary';
 import { pacificDay } from './pacificDay';
+import { bonusPayoutLines } from './bonusPayout';
+import { canonicalPersonKey, canonicalPersonLabel } from './personMerge';
 import type {
   BooksPayoutContext,
   BooksWorkbook,
@@ -66,6 +68,16 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     reimburse_cents: counting.filter((r) => r.needs_reimbursement).reduce((n, r) => n + r.amount_cents, 0),
     otherExpenses_cents: counting.filter((r) => expenseProfitBucket(r) === 'operating').reduce((n, r) => n + r.amount_cents, 0),
     bonus_cents: counting.filter((r) => expenseProfitBucket(r) === 'commission').reduce((n, r) => n + r.amount_cents, 0),
+    bonus_lines: bonusPayoutLines(
+      report.expenses || [],
+      report.prior_bonuses || [],
+      report.adjustments || [],
+      (employeeId) => {
+        const staff = payoutCtx.staff.find((person) => person.user_id === employeeId);
+        const key = staff ? canonicalPersonKey(staff.display_name, staff.email) : null;
+        return key ? canonicalPersonLabel(key) : (staff?.display_name || 'Associate');
+      },
+    ),
     categoryTotals: [...counting.reduce((m, e) => m.set(e.category, (m.get(e.category) || 0) + e.amount_cents), new Map<string, number>())].map(([category, amount_cents]) => ({ category, amount_cents })),
     exportRows: built.exportRows,
   };

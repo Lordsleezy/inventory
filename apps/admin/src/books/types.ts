@@ -118,6 +118,8 @@ export type Report = {
   payments: Row[];
   square_payments?: Row[];
   adjustments: Row[];
+  /** Bonus expenses from before this period that a bonus adjustment this period split. */
+  prior_bonuses?: Row[];
   prior_corrections: Row[];
   withdrawals: Row[];
   money_trail: Row[];
@@ -252,6 +254,7 @@ export type BooksWorkbook = {
     reimburse_cents: number;
     otherExpenses_cents: number;
     bonus_cents?: number;
+    bonus_lines?: { person: string; cents: number; note: string }[];
     duplicates: DuplicateNote[];
   };
   sales: { rows: SalesLine[]; channelTotals: { channel: string; revenue_cents: number; profit_cents: number; count: number }[]; totals: BookTotals };
