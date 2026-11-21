@@ -20,10 +20,10 @@ function workbook(sales: SalesLine[], returns: Record<string, unknown>[], extra:
       channelTotals: [],
       totals: { commission: extra.sales?.totals?.commission ?? 0, profit } as BooksWorkbook['sales']['totals'],
     },
-    inventory: { returns, ...(extra.inventory || {}) } as BooksWorkbook['inventory'],
+    inventory: { returns, ...(extra.inventory || {}) } as unknown as BooksWorkbook['inventory'],
     expenses: extra.expenses,
     payouts: extra.payouts,
-  } as BooksWorkbook;
+  } as unknown as BooksWorkbook;
 }
 
 test('profit is sales after tax is shown, and shipping, fees, refunds, and cost come out', () => {
@@ -78,10 +78,10 @@ test('in-store card fees stay out, and expenses, commissions, and giveaways come
     [sale({ channel: 'In-store', price_cents: 2000, card_fees_cents: 60, cost_cents: 500, profit_cents: 1500 })],
     [],
     {
-      expenses: { otherExpenses_cents: 250, total_cents: 400 } as BooksWorkbook['expenses'],
-      sales: { totals: { commission: 300 } } as BooksWorkbook['sales'],
-      inventory: { giveaways: [{ cost_cents: 125 }] } as BooksWorkbook['inventory'],
-      payouts: { owner: { ownerKeeps: 1500 - 300 - 250 } } as BooksWorkbook['payouts'],
+      expenses: { otherExpenses_cents: 250, total_cents: 400 } as unknown as BooksWorkbook['expenses'],
+      sales: { totals: { commission: 300 } } as unknown as BooksWorkbook['sales'],
+      inventory: { giveaways: [{ cost_cents: 125 }] } as unknown as BooksWorkbook['inventory'],
+      payouts: { owner: { ownerKeeps: 1500 - 300 - 250 } } as unknown as BooksWorkbook['payouts'],
     },
   ));
   const byLabel = new Map(lines.map((line) => [line.label, line]));
