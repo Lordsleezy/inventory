@@ -520,11 +520,13 @@ function writeStartSheet(
   line('Generated', timing.generated, '');
   line('What this report includes', '', COVERAGE);
   section('Result');
-  const bridgeStart = lines.findIndex((step) => step.label === 'Net merchandise sales');
+  const bridgeStart = lines.findIndex((step) => step.label === 'Gross merchandise sales');
   const bridge = lines.slice(bridgeStart >= 0 ? bridgeStart : 0).filter((step) =>
     step.role === 'amount' || step.role === 'deduction' || step.role === 'subtotal' || step.role === 'profit');
   const brief: Record<string, string> = {
-    'Net merchandise sales': 'What customers paid for the items, after completed refunds.',
+    'Gross merchandise sales': 'Item prices before refunds, so the next line can take the refunds out.',
+    'Completed refunds': 'Refunds already paid. Taken out of the sales above.',
+    'Net merchandise sales': 'Item prices left after those refunds.',
     'Customer-paid shipping': 'Added. The customer paid this on top of the item price.',
     'Cost of goods sold': 'What those sold items cost.',
     'Marketplace fees': 'Selling fees kept by the marketplaces.',
@@ -545,6 +547,10 @@ function writeStartSheet(
     const signed = step.role === 'deduction' ? -step.cents : step.cents;
     const row = line(step.label, show(signed), brief[step.label] || step.note);
     if (step.role === 'subtotal' || step.role === 'profit') row.font = { bold: true };
+    if (step.label === 'Completed refunds' || (step.label === 'Gross merchandise sales' && !find('Completed refunds')?.cents)) {
+      const openReturns = find('Open returns');
+      line('Open returns', openReturns ? moneyCell(openReturns.cents) : 'None', openReturns ? 'Still open. Not taken out of the total yet.' : 'No open refund amount on this export.');
+    }
   }
   section('Not the same as cash');
   line('Recorded transfers to the bank', show(wb.payouts?.bankPaidTotal_cents), 'Money recorded as leaving a platform or the safe. A transfer is not the same as the profit above, and it has not been matched to a bank statement.');
@@ -563,8 +569,6 @@ function writeStartSheet(
   line('Commissions still owed', show(wb.payouts?.stillOwed_all_time_cents), 'All-time balance. The amount owed at the start of the period is not on this export.');
   line('Marked to reimburse', show(exp.reimburse), 'Paybacks are not tracked separately.');
   const open = find('Open returns');
-  const returnsListed = Array.isArray(wb.inventory?.returns);
-  line('Open returns', open ? moneyCell(open.cents) : returnsListed ? 'None' : 'Not tracked', open ? 'Listed on Returns and not deducted from profit yet.' : returnsListed ? 'The return list has no open refund amount.' : 'No return list was on this export.');
   section('Inventory and missing cost');
   line('Stock on hand at cost', show(costs.endCost), 'Acquisition cost of units on hand. Not the asking price.');
   line('Asking price of stock on hand', show(costs.endFloor), 'Floor price. Not cost, and not cash.');
