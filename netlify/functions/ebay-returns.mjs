@@ -35,8 +35,8 @@ async function finishEbayRefund(sb, storeId, row, refundCents) {
     needs_decision: false,
     updated_at: now,
   }).eq("id", row.id);
-  // Owner profit drops via buyer_keep_refund_cents. Worker commissions stay.
-  // Do not void the sale or claw back payouts — garage still uses Back in stock / Defective.
+  // Profit drops by the refund. Commissions refreeze on the lower base:
+  // Paul and Jacob lose their percent, Steve keeps the rest. The sale stays open.
   const { error: profitErr } = await sb.rpc("return_apply_owner_profit_refund", { p_return_id: row.id });
   if (profitErr) throw new Error(profitErr.message);
   await sb.rpc("return_sync_label_expense", { p_return_id: row.id });
