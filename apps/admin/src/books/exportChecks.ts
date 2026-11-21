@@ -47,7 +47,7 @@ export function verifyExportTies(wb: BooksWorkbook): ExportTieIssue[] {
     issues.push({ check: 'bank_payouts', message: off(bankSum, wb.payouts.bankPaidTotal_cents, 'payout lines', 'the total', 'Paid to the bank') });
   }
 
-  const ownerCalc = t.profit - t.commission - t.otherExpenses;
+  const ownerCalc = t.profit - t.commission - t.otherExpenses - (t.bonus_cents || wb.expenses.bonus_cents || 0);
   if (Math.abs(ownerCalc - wb.payouts.owner.ownerKeeps) >= MIN_CENTS) {
     issues.push({
       check: 'owner_keeps',

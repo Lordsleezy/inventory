@@ -65,9 +65,10 @@ export function inventoryFlow(wb: BooksWorkbook) {
 export function expenseTie(wb: BooksWorkbook) {
   const recorded = Number(wb.expenses?.total_cents || 0);
   const operating = Number(wb.expenses?.otherExpenses_cents || 0);
-  const already = recorded - operating;
+  const bonus = Number(wb.expenses?.bonus_cents || 0);
+  const already = recorded - operating - bonus;
   const reimburse = Number(wb.expenses?.reimburse_cents || 0);
-  return { recorded, already, operating, reimburse, ties: recorded === already + operating };
+  return { recorded, already, operating, bonus, reimburse, ties: recorded === already + operating + bonus };
 }
 
 export function giveawayOverlap(wb: BooksWorkbook) {
@@ -104,6 +105,6 @@ export function missingCostPicture(wb: BooksWorkbook) {
 export const COVERAGE = [
   'This workbook is the store\'s books for the dates above. Dates are Pacific time.',
   'It includes sales that were not voided, the fees and labels on those sales, returns recorded in the period, expenses entered in books, inventory movement, items inventoried, manifest counts, recorded platform and safe balances, and commissions calculated from those sales.',
-  'It does not include a bank statement, unpaid bills, loans, payroll, or expenses that were never entered here. Profit and platform balances are not spendable cash. A recorded transfer is not a deposit that has been matched to the bank.',
+  'It does not include a bank statement, loans, or expenses that were never entered here. A reimbursement from an earlier month stays on the expenses until it is paid back. Profit and platform balances are not spendable cash. A recorded transfer is not a deposit that has been matched to the bank.',
   'Sales tax collected is money held for the state. The Sales tax return tab is a worksheet. Floor does not file it and does not validate it with CDTFA.',
 ].join(' ');

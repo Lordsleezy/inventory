@@ -266,9 +266,10 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   };
   expLine('Recorded on this tab', exp.recorded);
   expLine('Already in sales or returns', exp.already);
+  if (exp.bonus) expLine('Included in commissions', exp.bonus);
   expLine('Deducted as operating expenses', exp.operating);
   expLine('Marked to reimburse', exp.reimburse);
-  const expExplain = wsE.addRow(['Recorded expenses equal the part already inside sales and returns plus the operating expenses deducted on Profits. Amounts marked to reimburse are not a separate profit deduction. Paybacks are not tracked separately.']);
+  const expExplain = wsE.addRow(['Recorded expenses equal the part already inside sales and returns, bonuses included in commissions, and the operating expenses deducted on Profits. An unpaid reimbursement from an earlier month stays here until it is paid back. Amounts marked to reimburse are not a second profit deduction.']);
   mergeLabelRow(wsE, expExplain.number, 1, expCols, String(expExplain.getCell(1).value || ''));
   expExplain.height = 32;
   if (!exp.ties) {
