@@ -1,4 +1,5 @@
 import type { Worksheet } from 'exceljs';
+import { pacificDay } from './pacificDay';
 
 export const MONEY_FMT = '$#,##0.00;[Red]($#,##0.00)';
 export const DATE_FMT = 'mmm d, yyyy';
@@ -13,7 +14,7 @@ export function formatPeriodTitle(periodStart: string) {
 }
 
 export function excelDate(iso: string) {
-  const d = String(iso || '').slice(0, 10);
+  const d = pacificDay(iso);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
   const [y, m, day] = d.split('-').map(Number);
   return new Date(Date.UTC(y, m - 1, day, 12));
@@ -118,7 +119,7 @@ export function mergeLabelRow(ws: Worksheet, rowNum: number, fromCol: number, to
   cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'left' };
 }
 
-export function fitWrappedRowHeights(ws: Worksheet, from: number, to: number, colWidths: number[]) {
+export function fitWrappedRowHeights(ws: Worksheet, from: number, to: number, colWidths: number[], max = 32) {
   for (let r = from; r <= to; r++) {
     const row = ws.getRow(r);
     let lines = 1;
@@ -126,8 +127,21 @@ export function fitWrappedRowHeights(ws: Worksheet, from: number, to: number, co
       const w = colWidths[col - 1] || 12;
       lines = Math.max(lines, wrappedLines(String(cell.text || ''), w));
     });
-    row.height = Math.min(32, Math.max(16, 15 * lines));
+    row.height = Math.min(max, Math.max(16, 15 * lines));
   }
+}
+
+/** Freeze the heading row. Call this after setNormalSheetView, which clears views. */
+export function freezeHeader(ws: Worksheet, headerRow: number, xSplit = 0) {
+  ws.views = [{
+    state: 'frozen',
+    xSplit,
+    ySplit: headerRow,
+    topLeftCell: `${String.fromCharCode(65 + Math.min(xSplit, 25))}${headerRow + 1}`,
+    activeCell: 'A1',
+    showGridLines: true,
+    zoomScale: 100,
+  }];
 }
 
 export function bandRows(ws: Worksheet, from: number, to: number) {

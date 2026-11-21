@@ -188,6 +188,8 @@ export type ExpenseLine = {
   paid_by: string;
   needs_reimbursement: string;
   source: string;
+  /** Already inside a sale or return line, or deducted later as an operating expense. */
+  treatment?: string;
 };
 
 export type SalesLine = {

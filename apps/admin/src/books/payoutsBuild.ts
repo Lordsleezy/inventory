@@ -1,5 +1,6 @@
 import { isBonusCategory } from '../payouts';
 import { channelTitle } from './booksMath';
+import { pacificDay, pacificInRange } from './pacificDay';
 import { canonicalPersonKey, canonicalPersonLabel, mergeEmployeeIds } from './personMerge';
 import { computePayoutPersonBalances, type PersonBalance } from './payoutLedger';
 import { cutCommission, frozenTickets, ticketsFromReportSales } from './payoutTickets';
@@ -27,8 +28,7 @@ const MONEY_NAMES: Record<string, string> = {
 const ACTIVE_ACCOUNTS = ['ebay', 'depop', 'square', 'tiktok', 'amazon', 'safe'];
 
 function inMonth(iso: string, start: string, end: string) {
-  const d = iso.slice(0, 10);
-  return d >= start && d <= end;
+  return pacificInRange(iso, start, end);
 }
 
 export type MoneyOverviewRow = { account: string; balance_cents: number };
@@ -122,7 +122,7 @@ export function buildPayouts(
       if (!inMonth(String(p.paid_at || ''), period.period_start, period.period_end)) return false;
       const matchesBonus = (report.expenses || []).some((e) => !e.voided_at && bonuses.has(String(e.id))
         && Number(e.amount_cents) === Number(p.amount_cents)
-        && String(e.spent_on || e.date || '').slice(0, 10) === String(p.paid_at || '').slice(0, 10));
+        && pacificDay(e.spent_on || e.date) === pacificDay(p.paid_at));
       return !matchesBonus;
     })
     .reduce((n, p) => n + Number(p.amount_cents || 0), 0);

@@ -32,7 +32,8 @@ export function receivedInventoryCounts(items: ReceivedItem[]) {
   const categories = new Map<string, { units: number; cost_cents: number }>();
   for (const item of items) {
     const qty = receivedQty(item);
-    const cost = Number(item.cost_cents || 0) * qty;
+    const costKnownForTotal = item.cost_cents != null && item.cost_cents !== '' && Number.isFinite(Number(item.cost_cents));
+    const cost = costKnownForTotal ? Number(item.cost_cents) * qty : 0;
     units += qty;
     costCents += cost;
     const state = String(item.unit_state || '').toLowerCase();
@@ -42,7 +43,8 @@ export function receivedInventoryCounts(items: ReceivedItem[]) {
     if (isDefective) defective += qty;
     else if (listed.length) online += qty;
     else notListed += qty;
-    if (!Number(item.cost_cents)) missingCost += qty;
+    const costKnown = item.cost_cents != null && item.cost_cents !== '' && Number.isFinite(Number(item.cost_cents));
+    if (!costKnown) missingCost += qty;
     for (const channel of listed) channels.set(channel, (channels.get(channel) || 0) + qty);
     const condition = String(item.condition || 'Not set');
     conditions.set(condition, (conditions.get(condition) || 0) + qty);

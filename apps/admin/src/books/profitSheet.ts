@@ -1,3 +1,4 @@
+import { pacificDay } from './pacificDay.ts';
 import type { BooksWorkbook, Row, SalesLine } from './types';
 
 function channelName(value: unknown) {
@@ -11,7 +12,9 @@ export type ProfitLine = {
   /** Positive. Deductions are stored positive and written as a minus on the sheet. */
   cents: number;
   note: string;
-  role: 'amount' | 'deduction' | 'info' | 'subtotal' | 'profit';
+  role: 'amount' | 'deduction' | 'info' | 'subtotal' | 'profit' | 'reconcile';
+  /** Shown instead of a dollar amount when the figure is a count or a label. */
+  text?: string;
 };
 
 export type ReturnSheetRow = {
@@ -26,6 +29,8 @@ export type ReturnSheetRow = {
   /** Closed returns whose sale was voided. Open returns stay on the list and out of profit. */
   countsInProfit: boolean;
   inProfit: 'Yes' | 'Not yet' | 'No';
+  shippingDeducted: 'Yes' | 'No';
+  title: string;
 };
 
 const CLOSED = new Set(['refunded_no_return', 'dispositioned', 'closed']);
@@ -77,7 +82,7 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   const card = sum(sales.filter(cardCountsInProfit), (row) => row.card_fees_cents || 0);
   const cardOnTop = sum(sales, (row) => row.card_fees_cents || 0) - card;
   const cost = sum(sales.filter((row) => row.cost_cents != null), (row) => row.cost_cents ?? 0);
-  const leftOut = sum(unpriced, (row) => row.price_cents + row.buyer_shipping_cents - row.label_cost_cents - row.marketplace_fees_cents - (cardCountsInProfit(row) ? row.card_fees_cents : 0));
+  const leftOut = sum(unpriced, (row) => (row.price_cents || 0) + (row.buyer_shipping_cents || 0) - (row.label_cost_cents || 0) - (row.marketplace_fees_cents || 0) - (cardCountsInProfit(row) ? (row.card_fees_cents || 0) : 0));
   const columnProfit = sum(sales, (row) => row.profit_cents ?? 0);
   const built = merchandise + buyerShip - labels - fees - card - cost - leftOut;
   const gap = columnProfit - built;
@@ -85,123 +90,115 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   const other = Number(wb.expenses?.otherExpenses_cents || 0);
   const expenseTotal = Number(wb.expenses?.total_cents || 0);
   const commission = Number(wb.sales?.totals?.commission || wb.payouts?.owner?.commission || 0);
-  const givenAway = (wb.inventory?.giveaways || []).reduce((sum, row) => sum + Number(row.cost_cents || 0), 0);
+  const giveRows = wb.inventory?.giveaways || [];
+  let givenAway = 0;
+  let giveUnknown = 0;
+  for (const row of giveRows) {
+    const cost = row.cost_cents;
+    if (cost == null || cost === '' || !Number.isFinite(Number(cost))) giveUnknown += 1;
+    else givenAway += Number(cost);
+  }
   const replacements = (wb.inventory?.replacements || []).reduce((sum, row) => sum + Number(row.extra_cost_cents || 0), 0);
   const salesProfit = columnProfit;
   const profitCents = salesProfit - returnShip - other - commission - givenAway - replacements;
   const ownerKeeps = wb.payouts?.owner?.ownerKeeps;
 
+  const namedCommission = (wb.payouts?.commissions || []).filter((row) => row.role === 'staff').reduce((sum, row) => sum + row.earned_cents, 0);
+  const commissionGap = wb.payouts ? commission - namedCommission : 0;
+  const ownerFormula = salesProfit - commission - other;
   const lines: ProfitLine[] = [
     {
-      label: 'Sale prices',
+      label: 'Gross merchandise sales',
       cents: merchandise + refunds,
-      note: refunds
-        ? `Sales tab, Sale price column, adds up to ${dollars(merchandise)}. Refunded orders are not on that tab, so ${dollars(refunds)} is added back here and taken out on Returns / refunds.`
-        : 'Sales tab, Sale price column.',
+      note: 'Sale prices still on the Sales tab, plus completed refunds so the next line can take them back out.',
       role: 'amount',
     },
     {
-      label: 'Shipping customers paid',
+      label: 'Completed refunds',
+      cents: refunds,
+      note: 'Closed returns. Those sales are already off the Sales tab, so this only reverses the add-back above. Open returns are not in this number.',
+      role: 'deduction',
+    },
+    {
+      label: 'Net merchandise sales',
+      cents: merchandise,
+      note: 'Equals the Sale price column on the Sales tab.',
+      role: 'subtotal',
+    },
+    {
+      label: 'Customer-paid shipping',
       cents: buyerShip,
-      note: 'Sales tab, Buyer paid shipping column. Included in profit.',
+      note: 'Sales tab, Buyer paid shipping column. Included in sales contribution.',
       role: 'amount',
     },
     {
-      label: 'Sales tax',
-      cents: tax,
-      note: 'Sales tab, Sales tax column, and the Sales tax return tab. Collected for the state. It is not part of the sale price and it is not profit.',
-      role: 'info',
+      label: 'Cost of goods sold',
+      cents: cost,
+      note: 'Sales tab, Item cost column, for sales that have a cost. A blank cost is not treated as $0.',
+      role: 'deduction',
     },
     {
       label: 'Marketplace fees',
       cents: fees,
-      note: 'Sales tab. The Fees, card, label column is this plus card fees plus the shipping label. Do not add that column on top of these lines.',
+      note: 'Sales tab. The Fees, card, label column is marketplace fees plus card fees plus the outbound label. Do not add that column on top of these lines.',
       role: 'deduction',
     },
     {
       label: 'Card fees',
       cents: card,
-      note: 'Sales tab, Card fee column, where the fee comes out of the sale.',
+      note: 'Card fees that come out of the sale. In-store fees the customer paid on top are in the box below.',
+      role: 'deduction',
+    },
+    {
+      label: 'Outbound shipping',
+      cents: labels,
+      note: 'Sales tab, Shipping label (we paid) column. Labels to ship the order out.',
       role: 'deduction',
     },
   ];
-  if (cardOnTop) {
-    lines.push({
-      label: 'Card fees the customer paid',
-      cents: cardOnTop,
-      note: 'In-store. The customer paid this on top of the price, so it is not a cost and it is not in profit.',
-      role: 'info',
-    });
-  }
-  lines.push(
-    {
-      label: 'Shipping we paid',
-      cents: labels,
-      note: 'Sales tab, Shipping label (we paid) column.',
-      role: 'deduction',
-    },
-    {
-      label: 'Item cost',
-      cents: cost,
-      note: 'Sales tab, Item cost column.',
-      role: 'deduction',
-    },
-  );
   if (unpriced.length) {
     lines.push({
-      label: 'Sales with no item cost',
+      label: 'Sales left out, cost missing',
       cents: leftOut,
-      note: `${unpriced.length} sale${unpriced.length === 1 ? '' : 's'} still need a cost. Their price, shipping, and fees are in the lines above, and this pulls them back out until the cost is filled in.`,
+      note: `${unpriced.length} of ${sales.length} sales have no item cost. Their price, shipping, and fees are in the lines above, and this pulls that whole sale out. No cost was estimated.`,
       role: 'deduction',
-    });
-  }
-  lines.push({
-    label: 'Returns / refunds',
-    cents: refunds,
-    note: 'Returns tab. These orders are already off the Sales tab, so this only reverses the amount added back into Sale prices. Open returns are not in this number.',
-    role: 'deduction',
-  });
-  if (openRefunds) {
-    lines.push({
-      label: 'Open returns',
-      cents: openRefunds,
-      note: 'Returns tab. Not taken out of profit yet. They come out when the sale is voided.',
-      role: 'info',
     });
   }
   if (gap) {
     lines.push({
       label: 'Match the Sales tab',
       cents: Math.abs(gap),
-      note: `The lines above were ${dollars(gap)} off the Profit column on Sales. This makes the next line match that column.`,
+      note: `The lines above were ${dollars(gap)} off the Profit column on Sales. This makes sales contribution match that column. The difference is unresolved beyond that.`,
       role: gap > 0 ? 'amount' : 'deduction',
     });
   }
   lines.push(
     {
-      label: 'Profit on sales',
+      label: 'Sales contribution',
       cents: salesProfit,
-      note: 'Equals the Profit column on the Sales tab, and the Profit line on Payouts.',
+      note: 'Equals the Profit column on the Sales tab. This is profit on the sales that have an item cost, before return shipping, operating expenses, and commissions.',
       role: 'subtotal',
     },
     {
       label: 'Return shipping',
       cents: returnShip,
-      note: 'Returns tab, Return shipping column. The Sales profit does not subtract this, so it comes out here.',
+      note: 'Returns tab. Labels we paid to get items back, except canceled returns. Sales contribution does not subtract this.',
       role: 'deduction',
     },
     {
-      label: 'Other expenses',
+      label: 'Operating expenses',
       cents: other,
       note: expenseTotal
-        ? `Expenses tab grand total is ${dollars(expenseTotal)}. ${dollars(expenseTotal - other)} of that is fees and labels already taken out above, including return labels. This line is the rest.`
-        : 'Expenses tab. The part that is not already on a sale.',
+        ? `Expenses tab grand total is ${dollars(expenseTotal)}. ${dollars(expenseTotal - other)} of that is already in the sales and return lines above. This line is the rest.`
+        : 'Expenses that are not already on a sale or a return label.',
       role: 'deduction',
     },
     {
       label: 'Commissions',
       cents: commission,
-      note: 'Payouts tab, commissions for this period.',
+      note: commissionGap
+        ? `Deducted from profit. Paul and Jacob's earned lines add to ${dollars(namedCommission)}. ${dollars(commissionGap)} is on a commission rule this export does not name. It is not a plug, and it is not deducted twice.`
+        : 'Commission earned on this period\'s sales. The Payouts tab lists Paul and Jacob.',
       role: 'deduction',
     },
   );
@@ -209,8 +206,18 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     lines.push({
       label: 'Given away',
       cents: givenAway,
-      note: 'Inventory tab. Cost of items given away. Not on a sale.',
+      note: 'Inventory tab. Recorded cost of items given away. Not on a sale.'
+        + (giveUnknown ? ` ${giveUnknown} more have no cost and are not in this amount. Nothing was estimated.` : ''),
       role: 'deduction',
+    });
+  }
+  if (giveUnknown && !givenAway) {
+    lines.push({
+      label: 'Giveaways missing a cost',
+      cents: 0,
+      text: `${giveUnknown} items`,
+      note: `${giveUnknown} items given away have no recorded cost. They are not deducted, and no cost was estimated.`,
+      role: 'info',
     });
   }
   if (replacements) {
@@ -221,15 +228,74 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
       role: 'deduction',
     });
   }
-  const ownerNote = ownerKeeps == null
-    ? ''
-    : ` Payouts owner keeps is ${dollars(ownerKeeps)}. That number does not subtract return shipping${givenAway ? ' or items given away' : ''}.`;
   lines.push({
-    label: 'Profit',
+    label: 'Business profit',
     cents: profitCents,
-    note: `Profit on sales − return shipping − other expenses − commissions${givenAway ? ' − given away' : ''}${replacements ? ' − replacement cost' : ''}.${ownerNote}`,
+    note: 'Sales contribution − return shipping − operating expenses − commissions'
+      + (givenAway ? ' − items given away' : '')
+      + (replacements ? ' − replacement cost' : '')
+      + '. This is the profit figure for the period. It is not cash in the bank and it is not money available to withdraw.',
     role: 'profit',
   });
+  lines.push(
+    {
+      label: 'Sales tax collected',
+      cents: tax,
+      note: 'Collected for the state on top of the sale price. It is not inside net merchandise sales and it is not profit. The Sales tax return tab is the filing worksheet. Nothing here has been sent to CDTFA.',
+      role: 'info',
+    },
+  );
+  if (cardOnTop) {
+    lines.push({
+      label: 'Card fees the customer paid',
+      cents: cardOnTop,
+      note: 'In-store. The customer paid this on top of the price, so it is not a cost.',
+      role: 'info',
+    });
+  }
+  if (openRefunds) {
+    lines.push({
+      label: 'Open returns',
+      cents: openRefunds,
+      note: 'Requested or still in progress. Not deducted. They come out of profit when the sale is voided. An open return is not counted as back in stock.',
+      role: 'info',
+    });
+  }
+  lines.push({
+    label: 'Owner keeps',
+    cents: ownerKeeps ?? ownerFormula,
+    note: 'Sales contribution minus commissions minus operating expenses. It is an allocation of profit, not a bank balance and not spendable cash. It does not subtract return shipping'
+      + (givenAway ? ' or the cost of items given away' : '')
+      + '.',
+    role: 'reconcile',
+  });
+  if (ownerKeeps != null && ownerKeeps !== ownerFormula) {
+    lines.push({
+      label: 'Owner keeps does not match',
+      cents: ownerKeeps - ownerFormula,
+      note: 'The Payouts owner-keeps figure does not equal sales contribution minus commissions minus operating expenses. The difference is unresolved.',
+      role: 'reconcile',
+    });
+  }
+  lines.push({
+    label: 'Business profit vs owner keeps',
+    cents: (ownerKeeps ?? ownerFormula) - profitCents,
+    note: 'Owner keeps minus business profit. This should equal return shipping'
+      + (givenAway ? ' plus items given away' : '')
+      + (replacements ? ' plus replacement cost' : '')
+      + '.',
+    role: 'reconcile',
+  });
+  if (wb.payouts) {
+    lines.push({
+      label: 'Commission schedule vs profit',
+      cents: commissionGap,
+      note: commissionGap
+        ? `Paul and Jacob earned ${dollars(namedCommission)}. Profit deducts ${dollars(commission)}. The ${dollars(commissionGap)} difference is unresolved: this export only names those two people.`
+        : 'Paul and Jacob\'s earned commissions add up to the commission deducted in profit.',
+      role: 'reconcile',
+    });
+  }
   return lines;
 }
 
@@ -265,6 +331,7 @@ function whatHappened(row: Row): string {
   if (named[disposition]) return named[disposition];
   if (String(row.route_to || '') === 'supplier') return 'Sent to supplier';
   if (String(row.route_to || '') === 'garage') return 'Back in the garage';
+  if (returnIsOpen(row)) return 'Not confirmed back in stock';
   return '';
 }
 
@@ -274,10 +341,11 @@ function inProfitLabel(row: Row): ReturnSheetRow['inProfit'] {
   return 'No';
 }
 
-export function returnSheetRows(rows: Row[]): ReturnSheetRow[] {
+export function returnSheetRows(rows: Row[], titles: Map<string, string> = new Map()): ReturnSheetRow[] {
   return rows.map((row) => ({
-    date: String(row.date || row.created_at || '').slice(0, 10),
+    date: pacificDay(row.date || row.created_at),
     sku: String(row.sku || ''),
+    title: titles.get(String(row.sku || '')) || String(row.title || ''),
     order: String(row.order_id || row.external_order_id || ''),
     channel: channelName(row.channel),
     status: statusLabel(row.status),
@@ -286,5 +354,6 @@ export function returnSheetRows(rows: Row[]): ReturnSheetRow[] {
     labelCents: Number(row.label_cents || row.return_label_cents || 0),
     countsInProfit: returnCountsInProfit(row),
     inProfit: inProfitLabel(row),
+    shippingDeducted: returnLabelCounts(row) && Number(row.label_cents || row.return_label_cents || 0) > 0 ? 'Yes' : 'No',
   }));
 }

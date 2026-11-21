@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookTotals, BooksWorkbook, ExpenseDisplayLine, InventorySummary, Period, ReceivedItem, Report, Row, SalesLine } from './types';
 import { groupExpensesByCategory, groupReceivedByDay, receivedMonthStats } from './workbook';
+import { pacificDay } from './pacificDay';
 import { monthLabel } from './booksMath';
 import { periodPickerLabel, periodStatusLabel, periodUiStatus } from './periodStatus';
 import { saleWhyLines } from './saleNotes';
@@ -818,7 +819,7 @@ function InventoryBody({ money, inventory, manifested = 0, native, periodWord = 
           return [row, manifestedRow];
         })}
       </div>
-      <DetailBlock title="GIVEN AWAY" items={(inventory.giveaways || []).map((g) => ({ t: String(g.title), s: `${shortDate(String(g.date))} · SKU ${g.sku} · ${g.given_to}`, r: money(Number(g.cost_cents || 0)) }))} />
+      <DetailBlock title="GIVEN AWAY" items={(inventory.giveaways || []).map((g) => ({ t: String(g.title), s: `${shortDate(String(g.date))} · SKU ${g.sku} · ${g.given_to}`, r: g.cost_cents == null || g.cost_cents === '' ? 'Missing' : money(Number(g.cost_cents)) }))} />
       <DetailBlock title="REPLACEMENTS" items={(inventory.replacements || []).map((r) => ({ t: String(r.title), s: `Sale #${r.original_sale_id} · SKU ${r.sku}`, r: r.bad_unit_status === 'returned' ? 'Bad unit back' : String(r.bad_unit_status || '—') }))} />
       <DetailBlock title="RETURNS" items={(o?.returns?.length ? o.returns : inventory.returns || []).map((r) => ({ t: String(r.title || r.sku), s: `${r.channel} · SKU ${r.sku} · Refund ${money(Number(r.refund_cents || 0))}`, r: String(r.status || '') }))} />
     </>
@@ -861,15 +862,15 @@ function ReceivedBody({ money, items, manifested = 0, native }: { money: (c: num
               <div key={String(r.sku)} className="native-report-row books-received-row">
                 <span>
                   <strong>{String(r.title)}</strong>
-                  <small>SKU {String(r.sku)} · {String(r.category || '—')} · {String(r.condition || '—')}{r.cost_cents ? ` · Cost ${money(Number(r.cost_cents))}` : ' · Cost —'}{r.ask_cents ? ` · Floor ${money(Number(r.ask_cents))}` : ''}</small>
-                  <small className={!r.cost_cents ? 'fix' : ''}>{String(r.listing_status || r.unit_state || 'In stock')}{r.receiver_name ? ` · by ${r.receiver_name}` : ''}</small>
+                  <small>SKU {String(r.sku)} · {String(r.category || '—')} · {String(r.condition || '—')}{r.cost_cents == null || r.cost_cents === '' ? ' · Cost missing' : ` · Cost ${money(Number(r.cost_cents))}`}{r.ask_cents ? ` · Floor ${money(Number(r.ask_cents))}` : ''}</small>
+                  <small className={r.cost_cents == null || r.cost_cents === '' ? 'fix' : ''}>{String(r.listing_status || r.unit_state || 'In stock')}{r.receiver_name ? ` · by ${r.receiver_name}` : ''}</small>
                 </span>
                 <b>×{Number(r.qty_on_hand || 1)}</b>
               </div>
             ) : (
               <table key={String(r.sku)} className="books-table"><tbody><tr>
                 <td>{shortDate(String(r.received_at || ''))}</td><td>{String(r.sku)}</td><td>{String(r.title)}</td><td>{Number(r.qty_on_hand || 1)}</td>
-                <td>{r.cost_cents ? money(Number(r.cost_cents)) : '—'}</td><td>{String(r.listing_status || '')}</td>
+                <td>{r.cost_cents == null || r.cost_cents === '' ? 'Missing' : money(Number(r.cost_cents))}</td><td>{String(r.listing_status || '')}</td>
               </tr></tbody></table>
             ))}
           </div>
@@ -954,7 +955,9 @@ function ExpensesTable({ money, workbook }: { money: (c: number) => string; work
 
 function shortDate(iso: string) {
   if (!iso) return '—';
-  return new Date(`${iso.slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const day = pacificDay(iso);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return iso;
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 }
 
 function dayHeader(iso: string) {

@@ -9,6 +9,7 @@ import type { PersonBalance } from './payoutLedger';
 import { listFlaggedDefaultCostSales, listTrulyMissingCostSales } from './costTruth';
 import { saleWhyText } from './saleNotes';
 import { manifestedItemCount } from './receivedSummary';
+import { pacificDay } from './pacificDay';
 import type {
   BooksPayoutContext,
   BooksWorkbook,
@@ -178,7 +179,8 @@ export function receivedMonthStats(items: ReceivedItem[]) {
   for (const r of items) {
     const qty = Math.max(1, Number(r.qty_on_hand || 1));
     units += qty;
-    costCents += Number(r.cost_cents || 0) * qty;
+    const known = r.cost_cents != null && r.cost_cents !== '' && Number.isFinite(Number(r.cost_cents));
+    if (known) costCents += Number(r.cost_cents) * qty;
   }
   return { units, skus: items.length, cost_cents: costCents };
 }
@@ -186,7 +188,7 @@ export function receivedMonthStats(items: ReceivedItem[]) {
 export function groupReceivedByDay(items: ReceivedItem[]) {
   const groups = new Map<string, ReceivedItem[]>();
   for (const r of items) {
-    const day = String(r.received_at || '').slice(0, 10);
+    const day = pacificDay(r.received_at);
     const list = groups.get(day) || [];
     list.push(r);
     groups.set(day, list);

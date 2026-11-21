@@ -12,15 +12,17 @@ test('inventoried counts stay totals, and a listed plant is online', () => {
   const items = [
     { sku: '11855', qty_on_hand: 1, cost_cents: 500, unit_state: 'available', listing_status: 'ebay listed', category: 'Decor', condition: 'New' },
     { sku: '11856', qty_on_hand: 1, cost_cents: 0, unit_state: 'defective', listing_status: 'defective', category: 'Decor', condition: 'New' },
+    { sku: '11858', qty_on_hand: 1, cost_cents: null, unit_state: 'available', listing_status: 'available', category: 'Decor', condition: 'New' },
     { sku: '11857', qty_on_hand: 2, cost_cents: 300, unit_state: 'available', listing_status: 'available', category: 'Tools', condition: 'Used' },
   ] as ReceivedItem[];
   const counts = receivedInventoryCounts(items);
-  assert.equal(counts.skus, 3);
-  assert.equal(counts.units, 4);
+  assert.equal(counts.skus, 4);
+  assert.equal(counts.units, 5);
   assert.equal(counts.online_units, 1);
   assert.equal(counts.defective_units, 1);
-  assert.equal(counts.not_listed_units, 2);
+  assert.equal(counts.not_listed_units, 3);
   assert.equal(counts.missing_cost_units, 1);
+  assert.equal(counts.cost_cents, 500 + 300 * 2);
   assert.deepEqual(counts.channels, [{ channel: 'ebay', units: 1 }]);
 });
 

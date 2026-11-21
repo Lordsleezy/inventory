@@ -30,13 +30,36 @@ export function cdtfaPdfFileName(periodStart: string, periodEnd: string) {
 }
 
 export function fillCdtfaSheet(sheet: ExcelJS.Worksheet, model: CdtfaPrintModel) {
+  sheet.columns = [{ width: 14 }, { width: 62 }, { width: 16 }, { width: 18 }, { width: 14 }];
   sheet.addRow(['CDTFA-401-A REV. 126 (1-26)']);
+  sheet.getRow(1).font = { bold: true, size: 14 };
+  const intro = sheet.addRow(['This is a worksheet for the sales tax return. Floor calculated is the figure from the books. Edited means someone typed over it. Amounts are whole dollars. A draft has not been filed and has not been checked by CDTFA.']);
+  intro.height = 32;
   if (model.recordsNote) sheet.addRow([model.recordsNote]);
   if (model.optionTitle) sheet.addRow([model.optionTitle]);
   if (model.optionHint) sheet.addRow([model.optionHint]);
-  if (model.open) sheet.addRow(['DRAFT — PERIOD OPEN']);
+  if (model.open) sheet.addRow(['DRAFT — PERIOD OPEN. This is not a finished or filed return.']);
   sheet.addRow(['Period start', model.periodStart, 'Period end', model.periodEnd, 'Due', model.dueOn, model.periodLabel]);
+  const byIdEarly = new Map(model.lines.map((line) => [line.id, line]));
+  const taxLine = (id: string) => byIdEarly.get(id);
+  sheet.addRow(['Plain-language summary']);
+  sheet.getRow(sheet.rowCount).font = { bold: true };
+  const summary = (label: string, id: string, note: string) => {
+    const line = taxLine(id);
+    const row = sheet.addRow([id, label, line ? line.dollars : 'Not on this return', line ? line.floor : '', line?.edited ? 'Edited' : '']);
+    if (typeof row.getCell(3).value === 'number') row.getCell(3).numFmt = '$#,##0';
+    if (typeof row.getCell(4).value === 'number') row.getCell(4).numFmt = '$#,##0';
+    row.getCell(2).alignment = { wrapText: true };
+    if (note) sheet.addRow(['', note]);
+  };
+  summary('Total sales on the return', '1', 'Gross sales the form starts from. Marketplace sales can be included here and then deducted.');
+  summary('Marketplace sales deducted', '10', 'Sales where the marketplace collects and pays the tax. Included above, then removed from what you owe.');
+  summary('Transactions subject to tax', '12', 'The taxable amount after the form\'s deductions.');
+  summary('Total amount due', '26', 'Tax, penalty, and any interest on the form. Rounding to whole dollars can move this by $1 from the cents in the sales list.');
   sheet.addRow(['Line', 'Label', 'Amount', 'Floor calculated', 'Edited']);
+  const header = sheet.getRow(sheet.rowCount);
+  header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  header.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2F3E54' } }; });
   const byId = new Map(model.lines.map((line) => [line.id, line]));
   const used = new Set<string>();
   for (const [title, ids] of FORM_BLOCKS) {
@@ -45,7 +68,10 @@ export function fillCdtfaSheet(sheet: ExcelJS.Worksheet, model: CdtfaPrintModel)
     sheet.addRow([title]);
     for (const line of rows) {
       used.add(line.id);
-      sheet.addRow([line.id, line.label, line.dollars, line.floor, line.edited ? 'yes' : '']);
+      const added = sheet.addRow([line.id, line.label, line.dollars, line.floor, line.edited ? 'Edited' : 'Generated']);
+      added.getCell(2).alignment = { wrapText: true };
+      added.getCell(3).numFmt = '$#,##0';
+      added.getCell(4).numFmt = '$#,##0';
     }
   }
   for (const line of model.lines) {
