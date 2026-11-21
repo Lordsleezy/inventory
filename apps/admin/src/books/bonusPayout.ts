@@ -59,7 +59,11 @@ export function bonusPayoutLines(
     add(person, Number(row.amount_cents || 0), `${row.description || 'Bonus'} entered ${row.spent_on || row.date || 'earlier'}`);
   }
   for (const row of bonusAdj) {
-    add(personName(String(row.employee_id || '')), Number(row.amount_cents || 0), String(row.reason || 'Bonus'));
+    const cents = Number(row.amount_cents || 0);
+    const reason = String(row.reason || 'Bonus');
+    // A bonus paid out of commission is already inside the commission line.
+    if (cents > 0 && /commission/i.test(reason)) continue;
+    add(personName(String(row.employee_id || '')), cents, reason);
   }
   const receiver = bonusAdj.find((row) => Number(row.amount_cents) > 0);
   const receiverName = receiver ? personName(String(receiver.employee_id || '')) : '';
