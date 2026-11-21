@@ -229,12 +229,9 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     });
   }
   lines.push({
-    label: 'Business profit',
+    label: 'Owner keeps',
     cents: profitCents,
-    note: 'Sales contribution − return shipping − operating expenses − commissions'
-      + (givenAway ? ' − items given away' : '')
-      + (replacements ? ' − replacement cost' : '')
-      + '. This is the profit figure for the period. It is not cash in the bank and it is not money available to withdraw.',
+    note: 'What is left after the costs above goes to the owner. There is no separate business profit. It is not cash in the bank.',
     role: 'profit',
   });
   lines.push(
@@ -261,31 +258,14 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
       role: 'info',
     });
   }
-  lines.push({
-    label: 'Owner keeps',
-    cents: ownerKeeps ?? ownerFormula,
-    note: 'Sales contribution minus commissions minus operating expenses. It is an allocation of profit, not a bank balance and not spendable cash. It does not subtract return shipping'
-      + (givenAway ? ' or the cost of items given away' : '')
-      + '.',
-    role: 'reconcile',
-  });
   if (ownerKeeps != null && ownerKeeps !== ownerFormula) {
     lines.push({
       label: 'Owner keeps does not match',
       cents: ownerKeeps - ownerFormula,
-      note: 'The Payouts owner-keeps figure does not equal sales contribution minus commissions minus operating expenses. The difference is unresolved.',
+      note: 'The stored owner figure does not equal sales contribution minus commissions minus operating expenses. The difference is unresolved.',
       role: 'reconcile',
     });
   }
-  lines.push({
-    label: 'Business profit vs owner keeps',
-    cents: (ownerKeeps ?? ownerFormula) - profitCents,
-    note: 'Owner keeps minus business profit. This should equal return shipping'
-      + (givenAway ? ' plus items given away' : '')
-      + (replacements ? ' plus replacement cost' : '')
-      + '.',
-    role: 'reconcile',
-  });
   if (wb.payouts) {
     lines.push({
       label: 'Commission schedule vs profit',

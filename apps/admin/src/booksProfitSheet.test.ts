@@ -56,10 +56,11 @@ test('profit is sales after tax is shown, and shipping, fees, refunds, and cost 
   assert.equal(byLabel.get('Sales contribution')?.cents, pricedProfit);
   assert.equal(byLabel.get('Operating expenses')?.cents, 0);
   assert.equal(byLabel.get('Commissions')?.cents, 0);
-  assert.equal(byLabel.get('Business profit')?.cents, pricedProfit - 700);
+  assert.equal(byLabel.get('Owner keeps')?.cents, pricedProfit - 700);
+  assert.equal(byLabel.get('Owner keeps')?.role, 'profit');
   const added = lines.filter((line) => line.role === 'amount').reduce((sum, line) => sum + line.cents, 0);
   const taken = lines.filter((line) => line.role === 'deduction').reduce((sum, line) => sum + line.cents, 0);
-  assert.equal(added - taken, byLabel.get('Business profit')?.cents);
+  assert.equal(added - taken, byLabel.get('Owner keeps')?.cents);
 
   const listed = returnSheetRows([
     { sku: '12153', order_id: '240352', channel: 'ebay', status: 'refunded_no_return', refund_cents: 2000, date: '2026-11-12', buyer_keeps_item: true },
@@ -93,6 +94,6 @@ test('in-store card fees stay out, and expenses, commissions, and giveaways come
   assert.equal(byLabel.get('Operating expenses')?.cents, 250);
   assert.equal(byLabel.get('Commissions')?.cents, 300);
   assert.equal(byLabel.get('Given away')?.cents, 125);
-  assert.equal(byLabel.get('Business profit')?.cents, 1500 - 250 - 300 - 125);
-  assert.match(byLabel.get('Owner keeps')?.note || '', /not a bank balance/);
+  assert.equal(byLabel.get('Owner keeps')?.cents, 1500 - 250 - 300 - 125);
+  assert.match(byLabel.get('Owner keeps')?.note || '', /goes to the owner/);
 });

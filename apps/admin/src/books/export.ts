@@ -422,7 +422,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     }
     wsP.addRow([]);
   }
-  const payNote = wsP.addRow(['Amounts in the payout log are positive when money left the account. A recorded transfer has not been matched to a bank statement. Owner keeps is profit after commissions and operating expenses. It is not cash available to withdraw.']);
+  const payNote = wsP.addRow(['Amounts in the payout log are positive when money left the account. A recorded transfer has not been matched to a bank statement. What the owner keeps is the profit left after the costs. It is not cash available to withdraw.']);
   mergeLabelRow(wsP, payNote.number, 1, 5, String(payNote.getCell(1).value || ''));
   payNote.height = 32;
   wsP.addRow(['Commissions (Paul & Jacob)']).font = { bold: true, size: 12 };
@@ -447,17 +447,22 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   commissionRow.height = 36;
   wsP.addRow([]);
   wsP.addRow(['Owner']).font = { bold: true, size: 12 };
-  const ok = p.owner;
-  for (const [label, cents] of [
-    ['Sales contribution', ok.profit],
-    ['− Commissions', ok.commission],
-    ['− Operating expenses', ok.otherExpenses],
-    ['= Owner keeps', ok.ownerKeeps],
-  ] as const) {
-    const row = wsP.addRow([label, moneyCell(cents)]);
+  const ownerLines = profitStatement(wb);
+  const ownerStep = (label: string) => ownerLines.find((step) => step.label === label);
+  const ownerRows: [string, number][] = [['Sales contribution', ownerStep('Sales contribution')?.cents ?? p.owner.profit]];
+  for (const label of ['Return shipping', 'Operating expenses', 'Commissions', 'Given away', 'Replacement cost']) {
+    const cents = ownerStep(label)?.cents || 0;
+    if (cents) ownerRows.push([`− ${label}`, cents]);
+  }
+  ownerRows.push(['= Owner keeps', ownerLines.find((step) => step.role === 'profit')?.cents ?? 0]);
+  for (const [label, cents] of ownerRows) {
+    const row = wsP.addRow([label, moneyCell(label.startsWith('−') ? -cents : cents)]);
     if (label.startsWith('=')) row.font = { bold: true };
     row.getCell(2).numFmt = MONEY_FMT;
   }
+  const ownerNote = wsP.addRow(['What is left after these costs goes to the owner. There is no separate business profit. This is not cash in the bank.']);
+  mergeLabelRow(wsP, ownerNote.number, 1, 5, String(ownerNote.getCell(1).value || ''));
+  ownerNote.height = 28;
   wrapDataRows(wsP, hP, wsP.rowCount, 5);
   fitWrappedRowHeights(wsP, hP, wsP.rowCount, payWidths);
   fitTitleRows(wsP, 5, payWidths);
@@ -505,6 +510,7 @@ function writeStartSheet(
     row.getCell(1).alignment = { vertical: 'middle', wrapText: true };
     row.getCell(3).alignment = { vertical: 'middle', wrapText: true };
     if (typeof value === 'number') row.getCell(2).numFmt = MONEY_FMT;
+    return row;
   };
   section('Reporting period');
   line('Status', timing.status, timing.cutoff);
@@ -514,14 +520,34 @@ function writeStartSheet(
   line('Generated', timing.generated, '');
   line('What this report includes', '', COVERAGE);
   section('Result');
-  line('Net merchandise sales', show(find('Net merchandise sales')?.cents), 'Sale prices on the Sales tab, after completed refunds.');
-  line('Customer-paid shipping', show(find('Customer-paid shipping')?.cents), 'Included in profit. It is not part of the sale price.');
-  line('Business profit', show(find('Business profit')?.cents), 'The final profit on the Profits tab. It is not cash in the bank.');
-  section('These numbers are not the same');
-  line('Sales contribution', show(find('Sales contribution')?.cents), 'Profit on sales that have an item cost, before return shipping, operating expenses, and commissions.');
-  line('Owner keeps', show(find('Owner keeps')?.cents), 'Sales contribution minus commissions minus operating expenses. An allocation of profit, not spendable cash.');
-  line('Business profit', show(find('Business profit')?.cents), 'Owner keeps after return shipping and inventory losses that owner keeps does not subtract.');
-  line('Recorded transfers to the bank', show(wb.payouts?.bankPaidTotal_cents), 'Money recorded as leaving a platform or the safe. Not matched to a bank statement.');
+  const bridgeStart = lines.findIndex((step) => step.label === 'Net merchandise sales');
+  const bridge = lines.slice(bridgeStart >= 0 ? bridgeStart : 0).filter((step) =>
+    step.role === 'amount' || step.role === 'deduction' || step.role === 'subtotal' || step.role === 'profit');
+  const brief: Record<string, string> = {
+    'Net merchandise sales': 'What customers paid for the items, after completed refunds.',
+    'Customer-paid shipping': 'Added. The customer paid this on top of the item price.',
+    'Cost of goods sold': 'What those sold items cost.',
+    'Marketplace fees': 'Selling fees kept by the marketplaces.',
+    'Card fees': 'Card fees taken out of the sale.',
+    'Outbound shipping': 'Labels we paid to ship the orders.',
+    'Sales left out, cost missing': 'These sales have no item cost, so they are pulled out. Nothing was estimated.',
+    'Match the Sales tab': 'Makes this total match the Profit column on Sales.',
+    'Sales contribution': 'What is left on the sales, before the costs below.',
+    'Return shipping': 'Labels we paid to get items back.',
+    'Operating expenses': 'Expenses that are not already in the lines above.',
+    'Commissions': 'Commission earned on this period\'s sales.',
+    'Given away': 'Recorded cost of items given away.',
+    'Replacement cost': 'Extra cost of replacements.',
+    'Owner keeps': 'What is left goes to the owner. It is not a separate business balance, and it is not cash in the bank.',
+  };
+  for (const step of bridge) {
+    if (step.role === 'deduction' && !step.cents) continue;
+    const signed = step.role === 'deduction' ? -step.cents : step.cents;
+    const row = line(step.label, show(signed), brief[step.label] || step.note);
+    if (step.role === 'subtotal' || step.role === 'profit') row.font = { bold: true };
+  }
+  section('Not the same as cash');
+  line('Recorded transfers to the bank', show(wb.payouts?.bankPaidTotal_cents), 'Money recorded as leaving a platform or the safe. A transfer is not the same as the profit above, and it has not been matched to a bank statement.');
   section('Balances');
   const stores = wb.payouts?.stores || [];
   if (!stores.length) line('Platform and safe balances', 'Not available', 'No balance was stored for this period.');
@@ -548,13 +574,13 @@ function writeStartSheet(
   section('Profit by channel');
   if (!wb.sales.channelTotals.length) line('By channel', 'Not available', '');
   for (const channel of wb.sales.channelTotals) {
-    line(channel.channel, moneyCell(channel.profit_cents), `${channel.count} sales. This is sales contribution, not business profit.${timing.preliminary ? ' The period is still open, so this is not a full-period comparison.' : ''}`);
+    line(channel.channel, moneyCell(channel.profit_cents), `${channel.count} sales. This is profit on that channel's sales, before the shared costs in the result above.${timing.preliminary ? ' The period is still open, so this is not a full-period comparison.' : ''}`);
   }
   if (groups.length > 1) {
     section('Each period in this file');
     for (const group of groups) {
       const monthProfit = profitStatement(group.workbook).find((row) => row.role === 'profit');
-      line(group.label, show(monthProfit?.cents), 'Business profit for that slice. A slice that is still open is not a finished month.');
+      line(group.label, show(monthProfit?.cents), 'What the owner keeps for that slice. A slice that is still open is not a finished month.');
     }
   } else {
     line('Previous period', 'Not available', 'This file has one period, so a comparison is not included.');
@@ -562,7 +588,7 @@ function writeStartSheet(
   section('Read this before relying on the file');
   const issues = [
     timing.preliminary ? `${timing.status}. ${timing.cutoff}` : '',
-    costs.unknownSales ? `${costs.unknownSales} sales have no item cost, so business profit does not include them.` : '',
+    costs.unknownSales ? `${costs.unknownSales} sales have no item cost, so what the owner keeps does not include them.` : '',
     costs.receivedMissing ? `${costs.receivedMissing} inventoried units have no cost, so the received cost total is incomplete.` : '',
     comm.gap ? `Commission deducted in profit does not equal Paul and Jacob combined. The difference is on the Profits and Payouts tabs and is unresolved.` : '',
     flow.ties ? '' : 'The inventory movement does not equal the closing count.',
