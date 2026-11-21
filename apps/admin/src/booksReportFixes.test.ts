@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { bonusPayoutLines } from './books/bonusPayout.ts';
-import { unpaidCarryCents } from './books/carryExpenses.ts';
+import { carriedLossCents, unpaidCarryCents } from './books/carryExpenses.ts';
 import { buildExpenses } from './books/expenseBuild.ts';
 import { profitStatement } from './books/profitSheet.ts';
 import { applySaleFeeAdjustments } from './books/saleAdjustments.ts';
@@ -100,6 +100,29 @@ test('a 500 dollar bonus given partly to someone else shows what is left', () =>
   assert.equal(lines.reduce((sum, line) => sum + line.cents, 0), 50000);
   assert.match(byPerson.get('Paul')?.note || '', /Was \$500\.00/);
   assert.match(byPerson.get('Paul')?.note || '', /Jacob/);
+});
+
+test('a month that lost money stays on the following months until profit covers it', () => {
+  assert.equal(carriedLossCents([-275536]), 275536);
+  assert.equal(carriedLossCents([-275536, 200000]), 75536);
+  assert.equal(carriedLossCents([-275536, 300000]), 0);
+  assert.equal(carriedLossCents([100000, -275536]), 275536);
+  const lines = profitStatement({
+    sales: {
+      rows: [{
+        price_cents: 100000, profit_cents: 100000, cost_cents: 0, marketplace_fees_cents: 0,
+        card_fees_cents: 0, buyer_shipping_cents: 0, label_cost_cents: 0, tax_cents: 0, channel: 'eBay',
+      }],
+      totals: { commission: 0, profit: 100000 },
+    },
+    expenses: { rows: [], otherExpenses_cents: 0, total_cents: 0, carried_loss_cents: 275536 },
+    inventory: { returns: [] },
+    payouts: { commissions: [], owner: { ownerKeeps: 100000 } },
+  } as unknown as BooksWorkbook);
+  const byLabel = new Map(lines.map((line) => [line.label, line]));
+  assert.equal(byLabel.get('Total expenses')?.cents, 275536);
+  assert.equal(byLabel.get('Net after expenses')?.cents, 100000 - 275536);
+  assert.match(byLabel.get('Total expenses')?.note || '', /earlier months/);
 });
 
 test('an unpaid reimbursement from an earlier month stays until a payment covers it', () => {
