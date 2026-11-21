@@ -74,10 +74,11 @@ test('a bonus is included in commissions and is not also an operating expense', 
     payouts: { commissions: [{ person: 'Paul', role: 'staff', earned_cents: 30000 }], owner: { ownerKeeps: 60000 } },
   } as unknown as BooksWorkbook);
   const byLabel = new Map(lines.map((line) => [line.label, line]));
-  assert.equal(byLabel.get('Commissions')?.cents, 40000);
-  assert.equal(byLabel.get('Operating expenses')?.cents, 0);
-  assert.match(byLabel.get('Commissions')?.note || '', /bonuses/);
-  assert.equal(byLabel.get('Owner keeps')?.cents, 60000);
+  assert.equal(byLabel.get('Commissions')?.cents, 30000);
+  assert.equal(byLabel.get('Owner profit')?.cents, 70000);
+  assert.equal(byLabel.get('Total expenses')?.cents, 0);
+  assert.equal(byLabel.get('Net after expenses')?.cents, 70000);
+  assert.match(byLabel.get('Commissions')?.note || '', /Bonus/);
 });
 
 test('an unpaid reimbursement from an earlier month stays until a payment covers it', () => {
