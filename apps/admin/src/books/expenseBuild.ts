@@ -86,6 +86,7 @@ export type BuiltExpenses = {
   reimburse_cents: number;
   otherExpenses_cents: number;
   bonus_cents: number;
+  bonus_lines?: { person: string; cents: number; note: string }[];
   duplicates: DuplicateNote[];
 };
 
