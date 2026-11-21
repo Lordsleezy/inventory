@@ -74,6 +74,16 @@ export function choiceBounds(year: number, id: string) {
   };
 }
 
+/** The books month for a Reports pick. A September pick is September, even when November is newer and a week inside September is also listed. */
+export function periodForChoice<T extends { period_start: string }>(periods: T[], year: number, pick: string): T | null {
+  const next = choiceBounds(year, pick);
+  const day = (row: T) => row.period_start.slice(0, 10);
+  if (next.span === 'month') return periods.find((row) => day(row) === next.start) || null;
+  return periods
+    .filter((row) => day(row) >= next.start && day(row) <= next.end)
+    .sort((a, b) => day(a).localeCompare(day(b)))[0] || null;
+}
+
 export function reportFileStem(year: number, id: string) {
   if (id.startsWith('q')) return `Open-Box_Reports_${year}-${id.toUpperCase()}`;
   const month = Number(id.slice(1));

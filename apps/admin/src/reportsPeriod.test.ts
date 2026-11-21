@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { choiceBounds, defaultPeriodId, periodChoices, reportFileStem, yearsFrom } from './books/reportsPeriod.ts';
+import { choiceBounds, defaultPeriodId, periodChoices, periodForChoice, reportFileStem, yearsFrom } from './books/reportsPeriod.ts';
 
 const november = new Date(2026, 10, 8);
 
@@ -29,4 +29,16 @@ test('default is the current month and years stop at this year', () => {
   assert.equal(choiceBounds(2026, 'q3').end, '2026-09-30');
   assert.equal(reportFileStem(2026, 'm11'), 'Open-Box_Reports_2026-11');
   assert.equal(reportFileStem(2026, 'q3'), 'Open-Box_Reports_2026-Q3');
+});
+
+test('a september pick stays on september when november is already loaded', () => {
+  const periods = [
+    { id: 'nov', period_start: '2026-11-01' },
+    { id: 'oct', period_start: '2026-10-01' },
+    { id: 'sep-week', period_start: '2026-09-28' },
+    { id: 'sep', period_start: '2026-09-01' },
+  ];
+  assert.equal(periodForChoice(periods, 2026, 'm9')?.id, 'sep');
+  assert.equal(periodForChoice(periods, 2026, 'm11')?.id, 'nov');
+  assert.equal(periodForChoice(periods, 2026, 'q4')?.id, 'oct');
 });

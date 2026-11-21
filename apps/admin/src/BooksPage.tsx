@@ -1,8 +1,8 @@
-﻿import { useCallback, useEffect, useMemo, useState } from 'react';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import ExcelJS from 'exceljs';
 import { ReportsHome } from './books/ReportsHome';
-import { choiceBounds, defaultPeriodId, periodChoices, reportFileStem, yearsFrom } from './books/reportsPeriod';
+import { choiceBounds, defaultPeriodId, periodChoices, periodForChoice, reportFileStem, yearsFrom } from './books/reportsPeriod';
 import { showSpreadsheet } from './books/sheetView';
 import { normalizeReport } from './books/booksMath';
 import { addCdtfaExcelSheet, addCdtfaPdfPages, cdtfaPdfFileName } from './books/cdtfaExport';
@@ -94,6 +94,8 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   const [loadRetry, setLoadRetry] = useState(0);
   const [reportYear, setReportYear] = useState(() => Number(sessionStorage.getItem('floor-reports-year')) || new Date().getFullYear());
   const [reportPick, setReportPick] = useState(() => sessionStorage.getItem('floor-reports-pick') || defaultPeriodId(new Date()));
+  const reportChoice = useRef({ year: reportYear, pick: reportPick });
+  reportChoice.current = { year: reportYear, pick: reportPick };
   const [fileBusy, setFileBusy] = useState<'' | 'sheet' | 'tax' | 'view-sheet' | 'view-tax' | 'full'>('');
   const [fileError, setFileError] = useState('');
 
@@ -118,7 +120,8 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
     const loaded = ((data || []) as Period[]).filter((p) => p.period_type === 'month');
     loaded.sort((a, b) => b.period_start.localeCompare(a.period_start));
     setPeriods(loaded);
-    setPeriodId((cur) => (cur && loaded.some((p) => p.id === cur) ? cur : loaded[0]?.id || ''));
+    const chosen = periodForChoice(loaded, reportChoice.current.year, reportChoice.current.pick);
+    setPeriodId(chosen?.id || loaded[0]?.id || '');
   }, [client]);
 
   const loadPayoutSide = useCallback(async (storeId: string, periodStart: string) => {
@@ -210,6 +213,10 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   }, [client, loadPayoutSide, resolveStoreId]);
 
   useEffect(() => { void loadPeriods().catch((e) => setError(loadErrorMessage(e, 'month'))); }, [loadPeriods]);
+  useEffect(() => {
+    const chosen = periodForChoice(periods, reportYear, reportPick);
+    if (chosen && chosen.id !== periodId) setPeriodId(chosen.id);
+  }, [periods, reportYear, reportPick, periodId]);
   useEffect(() => { if (selected) void loadSpan(selected, span, periods); }, [selected, span, periods, loadSpan, loadRetry]);
   useEffect(() => { setSheet('hub'); }, [periodId]);
 
@@ -285,7 +292,12 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
   useEffect(() => { if (span === 'year' && filing !== 'yearly') setSpan('quarter'); }, [span, filing]);
 
   useEffect(() => {
-    if (!workbook || !viewPeriod || !selected) { setExportFiles(null); setTaxForm(null); return; }
+    const picked = choiceBounds(reportYear, reportPick);
+    const starts = parts.map((part) => part.period.period_start.slice(0, 10));
+    const ready = picked.span === 'month'
+      ? starts.length === 1 && starts[0] === picked.start
+      : starts.length > 0 && starts.every((start) => start >= picked.start && start <= picked.end);
+    if (!workbook || !viewPeriod || !selected || !ready) { setExportFiles(null); setTaxForm(null); return; }
     let cancelled = false;
     setExportsPreparing(true);
     void (async () => {
@@ -365,7 +377,7 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
       } finally { if (!cancelled) setExportsPreparing(false); }
     })();
     return () => { cancelled = true; };
-  }, [client, workbook, selected, viewPeriod, money, span, slices]);
+  }, [client, workbook, selected, viewPeriod, money, span, slices, parts, reportYear, reportPick]);
 
   useEffect(() => {
     if (!native || !onNativeNavigation) return;
@@ -559,16 +571,11 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
     sessionStorage.setItem('floor-reports-pick', nextPick);
     const next = choiceBounds(nextYear, nextPick);
     setSpan(next.span);
-    const match = periods.find((row) => row.period_start >= next.start && row.period_start <= next.end);
+    setExportFiles(null);
+    setExportsPreparing(true);
+    const match = periodForChoice(periods, nextYear, nextPick);
     if (match) setPeriodId(match.id);
-  }
-
-  async function emptyWorkbook() {
-    const book = new ExcelJS.Workbook();
-    const sheet = book.addWorksheet('Sales');
-    sheet.addRow(['No sales this month']);
-    const out = await book.xlsx.writeBuffer();
-    return new Uint8Array(out);
+    else setExportsPreparing(false);
   }
 
   async function taxForSelection() {
@@ -613,7 +620,17 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         return;
       }
       if (kind === 'sheet' || kind === 'view-sheet') {
-        const excel = exportFiles?.excel ?? await emptyWorkbook();
+        const picked = choiceBounds(reportYear, reportPick);
+        const starts = parts.map((part) => part.period.period_start.slice(0, 10));
+        const ready = picked.span === 'month'
+          ? starts.length === 1 && starts[0] === picked.start
+          : starts.length > 0 && starts.every((start) => start >= picked.start && start <= picked.end);
+        if (!exportFiles?.excel || !ready) {
+          if (popup && !popup.closed) popup.close();
+          setFileError('That month is still loading. Try the download again in a second.');
+          return;
+        }
+        const excel = exportFiles.excel;
         if (kind === 'view-sheet') await showSpreadsheet(popup, excel, `${stem}.xlsx`);
         else downloadBytes(`${stem}.xlsx`, excel, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
         return;
