@@ -17,6 +17,7 @@ import {
   type MonthTicket,
 } from './payoutTickets';
 import { effectiveCostCents } from './costTruth';
+import { pacificDay } from './pacificDay';
 import type { BookTotals, BooksPayoutContext, FrozenMap, Report, Row, SalesLine } from './types';
 
 const channelFees = (t: MonthTicket) => Math.max(0, t.feeCents ?? 0);
@@ -133,7 +134,7 @@ export function buildSalesLinesFromPayout(
     const p = cost === null ? null : (ticket ? lineBooksProfit(ticket, lineIdx) : null);
     return {
       sale_id: String(row.id ?? ''),
-      date: String(row.sold_at || row.date || '').slice(0, 10),
+      date: pacificDay(row.sold_at || row.date),
       sku: String(row.sku || ''),
       title: String(row.item_title || row.title || row.sku || ''),
       channel: channelTitle(ch),

@@ -1,5 +1,6 @@
 import { isBonusCategory } from '../payouts';
 import { channelTitle } from './booksMath';
+import { pacificDay } from './pacificDay';
 import type { DuplicateNote, ExpenseDisplayLine, ExpenseLine, Report, Row } from './types';
 
 const STORE_CHECKOUT = new Set(['ebay', 'tiktok', 'amazon']);
@@ -181,7 +182,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const unmatchedEbay = ebay && !onSale;
     rows.push({
       id: `label:${l.id}`,
-      date: String(l.date || '').slice(0, 10),
+      date: pacificDay(l.date),
       category: unmatchedEbay ? 'Unmatched shipping label' : 'Out-of-pocket shipping',
       title: unmatchedEbay
         ? `Unmatched eBay label${order ? ` · ${order}` : ''}`
@@ -211,7 +212,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     if (!cents) continue;
     rows.push({
       id: `unmatched-postage:${fid || order}`,
-      date: String(f.date || '').slice(0, 10),
+      date: pacificDay(f.date),
       category: 'Unmatched shipping label',
       title: `Unmatched eBay postage${order ? ` · ${order}` : ''}`,
       amount_cents: cents,
@@ -237,7 +238,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const g = promotedGroups.get(key) || { account, charges: [], total: 0, dates: [] };
     const charge: ExpenseDisplayLine = {
       id: fid || `promoted:${f.date}`,
-      date: String(f.date || '').slice(0, 10),
+      date: pacificDay(f.date),
       category: 'Promoted listings',
       title: String(f.type || 'Promoted listing'),
       amount_cents: Number(f.amount_cents || 0),
@@ -284,7 +285,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     if (!fromBalance && String(r.label_paid_by || 'seller') !== 'seller') continue;
     rows.push({
       id: key,
-      date: String(r.created_at || r.date || '').slice(0, 10),
+      date: pacificDay(r.created_at || r.date),
       category: fromBalance ? 'Returns' : 'Out-of-pocket shipping',
       title: `Return label · ${channelTitle(r.channel)} · SKU ${r.sku}`,
       amount_cents: labelCents,
@@ -318,6 +319,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     paid_by: r.sourceDisplay || 'Store',
     needs_reimbursement: r.needs_reimbursement ? 'Yes' : 'No',
     source: r.sourceDisplay,
+    treatment: r.countsInProfit ? 'Already in the sales or return lines' : 'Deducted as an operating expense',
   }));
 
   return { rows, exportRows, categoryTotals, total_cents, reimburse_cents, otherExpenses_cents, duplicates };
