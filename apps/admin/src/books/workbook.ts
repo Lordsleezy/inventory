@@ -70,14 +70,8 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     exportRows: built.exportRows,
   };
 
-  // Staff keep 30% of the profit on each sale after marketplace fees. The owner keeps the other 70%.
-  // Stored payout cents were figured before those fees, so this report recalculates them.
-  const booksCtx: BooksPayoutContext = {
-    ...payoutCtx,
-    cfg: { ...payoutCtx.cfg, absorbFees: false },
-    frozen: new Map(),
-  };
-  const computed = computeBooksFromReport(report, booksCtx, built.otherExpenses_cents, overrides);
+  // Same commission Floor saved on each sale: frozen payout cents, and the store's fee rule.
+  const computed = computeBooksFromReport(report, payoutCtx, built.otherExpenses_cents, overrides);
   const saleById = new Map((report.sales || []).map((r) => [String(r.id), r]));
   const salesLines = computed.salesLines.map((s) => {
     const src = saleById.get(s.sale_id) || { id: s.sale_id, profit_cents: s.profit_cents, cost_cents: s.cost_cents };
@@ -89,7 +83,7 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
   });
 
   const totals = { ...computed.totals, bonus_cents: built.bonus_cents };
-  const payouts = buildPayouts(report, totals, booksCtx, money, overrides, ledgerBalances);
+  const payouts = buildPayouts(report, totals, payoutCtx, money, overrides, ledgerBalances);
 
   const ch = new Map<string, { revenue_cents: number; profit_cents: number; count: number }>();
   for (const s of salesLines) {

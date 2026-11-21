@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from '
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { BookTotals, BooksWorkbook, ExpenseDisplayLine, InventorySummary, Period, ReceivedItem, Report, Row, SalesLine } from './types';
 import { groupExpensesByCategory, groupReceivedByDay, receivedMonthStats } from './workbook';
+import { profitStatement } from './profitSheet';
 import { pacificDay } from './pacificDay';
 import { monthLabel } from './booksMath';
 import { periodPickerLabel, periodStatusLabel, periodUiStatus } from './periodStatus';
@@ -182,7 +183,7 @@ function SpanParts({ p, render, compact, linesOnly, rollup }: {
           {rollup && render(p.workbook, p.spanWord)}
           {!compact && !rollup && (
             <p className="books-span-subtotal">
-              Sales {p.money(totals.revenue)} · Profit {p.money(totals.profit)} · Commissions {p.money(totals.commission)} · Expenses {p.money(p.workbook.expenses.total_cents)} · Owner keeps {p.money(p.workbook.payouts.owner.ownerKeeps)}
+              Sales {p.money(totals.revenue)} · Profit {p.money(totals.profit)} · Commissions {p.money(statementCents(p.workbook, 'Commissions'))} · Expenses {p.money(statementCents(p.workbook, 'Total expenses'))} · Owner profit {p.money(statementCents(p.workbook, 'Owner profit'))}
             </p>
           )}
         </section>
@@ -226,7 +227,7 @@ function BooksNative(p: ViewProps) {
         onResolveLabel={p.onResolveLabel}
         onOpen={(sheet, ids) => { p.setSheet(sheet); setFocusIds(ids); }}
       />
-      <BooksDeskStrip money={p.money} totals={p.totals} />
+      <BooksDeskStrip money={p.money} totals={p.totals} workbook={p.workbook} />
       <AppScrollTabs ariaLabel="Books reports" className="books-phone-tabs" items={PHONE_TABS.map((item) => ({ id: item.id, label: item.title }))} value={tab} onChange={(id) => p.setSheet(id)} />
       {tab === 'sales' && <PhoneSales money={p.money} workbook={p.workbook} focusIds={focusIds} />}
       {tab === 'expenses' && <SpanParts p={p} render={(workbook) => <ExpensesBody money={p.money} workbook={workbook} native />} />}
@@ -306,7 +307,7 @@ function BooksDesktop(p: ViewProps) {
         onResolveLabel={p.onResolveLabel}
         onOpen={(sheet, ids) => { p.setDesktopTab(sheet); setFocusIds(ids); }}
       />
-      <BooksDeskStrip money={p.money} totals={p.totals} />
+      <BooksDeskStrip money={p.money} totals={p.totals} workbook={p.workbook} />
       <nav className="books-desktop-tabs" aria-label="Books reports">
         {REPORT_ROWS.map((t) => (
           <button key={t.id} type="button" className={tab === t.id ? 'active' : ''} onClick={() => p.setDesktopTab(t.id)}>{t.title}</button>
@@ -353,15 +354,21 @@ function feePolicyLine(absorbFees?: boolean, channels?: string[]) {
   return `${owner} ${comm} Online: ${ch}.`;
 }
 
-function BooksDeskStrip({ money, totals }: { money: (c: number) => string; totals: BookTotals }) {
+function statementCents(workbook: BooksWorkbook, label: string) {
+  return profitStatement(workbook).find((line) => line.label === label)?.cents || 0;
+}
+
+function BooksDeskStrip({ money, totals, workbook }: { money: (c: number) => string; totals: BookTotals; workbook: BooksWorkbook }) {
   const cells: { label: string; value: string; lead?: boolean }[] = [
-    { label: 'Owner keeps', value: money(totals.ownerKeeps), lead: true },
+    { label: 'Owner profit', value: money(statementCents(workbook, 'Owner profit')), lead: true },
     { label: 'Sales', value: money(totals.revenue) },
     { label: 'Fees', value: `−${money(totals.feesAndLabels)}` },
     { label: 'COGS', value: `−${money(totals.cost)}` },
     { label: 'Profit', value: money(totals.profit) },
-    { label: 'Commissions', value: `−${money(totals.commission)}` },
-    { label: 'Other exp.', value: `−${money(totals.otherExpenses)}` },
+    { label: 'Commissions', value: `−${money(statementCents(workbook, 'Commissions'))}` },
+    { label: 'Bonuses', value: `−${money(statementCents(workbook, 'Bonuses'))}` },
+    { label: 'Expenses', value: `−${money(statementCents(workbook, 'Total expenses'))}` },
+    { label: 'Net', value: money(statementCents(workbook, 'Net after expenses')) },
   ];
   return (
     <div className="books-desk-strip">
@@ -690,12 +697,14 @@ function PayoutsBody({ money, workbook, periodWord = 'month' }: { money: (c: num
       <div className="books-owner-card native-report-form">
         <p className="native-report-section">OWNER</p>
         <div className="books-summary-stack owner-stack">
-          <div className="books-summary-line"><span>Profit</span><b>{money(p.owner.profit)}</b></div>
-          <div className="books-summary-line"><span>− Commissions</span><b>{money(p.owner.commission)}</b></div>
-          <div className="books-summary-line"><span>− Other expenses</span><b>{money(p.owner.otherExpenses)}</b></div>
-          <div className="books-summary-line profit-line"><span>= Owner keeps</span><b className="positive">{money(p.owner.ownerKeeps)}</b></div>
+          <div className="books-summary-line"><span>Sales contribution</span><b>{money(statementCents(workbook, 'Sales contribution'))}</b></div>
+          <div className="books-summary-line"><span>− Commissions</span><b>{money(statementCents(workbook, 'Commissions'))}</b></div>
+          <div className="books-summary-line"><span>− Bonuses</span><b>{money(statementCents(workbook, 'Bonuses'))}</b></div>
+          <div className="books-summary-line"><span>= Owner profit</span><b className="positive">{money(statementCents(workbook, 'Owner profit'))}</b></div>
+          <div className="books-summary-line"><span>− Total expenses</span><b>{money(statementCents(workbook, 'Total expenses'))}</b></div>
+          <div className="books-summary-line profit-line"><span>= Net after expenses</span><b className="positive">{money(statementCents(workbook, 'Net after expenses'))}</b></div>
         </div>
-        <p className="native-report-footnote">Other expenses = Expenses page minus anything already counted in profit.</p>
+        <p className="native-report-footnote">Same figures as the spreadsheet. Commissions are what Floor saved on each sale. Bonuses are the line under that. Expenses come off after owner profit.</p>
       </div>
     </>
   );

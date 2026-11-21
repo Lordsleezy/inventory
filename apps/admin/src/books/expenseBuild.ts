@@ -151,6 +151,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     const title = cleanTitle(String(e.description || ''), source, sku, String(e.order_id || ''));
     const isBonus = category === 'Bonus' || isBonusCategory(String(e.category || ''));
     const person = staffNames.get(String(e.employee_id || '')) || '';
+    const namedTitle = isBonus && person ? `${title} · ${person}` : title;
     const desc = String(e.description || '').toLowerCase();
     const namedMarket = [...MARKETPLACE].find((c) => desc.includes(c) || String(e.channel || '').toLowerCase() === c) || '';
     const fromBalance = (desc.includes('return label') || source === 'return') && namedMarket
@@ -164,9 +165,9 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
       id: String(e.id || `${e.date}-${title}`),
       date: pacificDay(e.date ?? e.spent_on),
       category: fromBalance && category === 'Out-of-pocket shipping' ? 'Returns' : category,
-      title: carried ? `${title} · still unpaid from an earlier month` : title,
+      title: carried ? `${namedTitle} · still unpaid from an earlier month` : namedTitle,
       amount_cents: Number(e.amount_cents || 0),
-      sourceDisplay: fromBalance || (reimburse ? (person || 'Person') : (source === 'manual' ? 'Store' : channelTitle(source) || 'Store')),
+      sourceDisplay: isBonus && person ? person : (fromBalance || (reimburse ? (person || 'Person') : (source === 'manual' ? 'Store' : channelTitle(source) || 'Store'))),
       sku_or_order: publicRef(String(e.order_id || e.external_id || ''), sku),
       needs_reimbursement: reimburse,
       countsInProfit: !carried && (onSale || Boolean(fromBalance)),

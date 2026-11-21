@@ -57,6 +57,6 @@ test('inventory movement, expense split, missing cost, and commission gap stay v
   assert.equal(comm.deducted - comm.named, 1189);
   assert.equal(moneyReasonLabel('count_correction'), 'Count correction');
   const lines = profitStatement(wb);
-  assert.equal(lines.find((line) => line.label === 'Commissions')?.cents, 0);
-  assert.equal(lines.find((line) => line.label === 'Owner profit')?.cents, 0);
+  assert.equal(lines.find((line) => line.label === 'Commissions')?.cents, 95656 + 35082);
+  assert.equal(lines.find((line) => line.label === 'Owner profit')?.cents, -(95656 + 35082));
 });
