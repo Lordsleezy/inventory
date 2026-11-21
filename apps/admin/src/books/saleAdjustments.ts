@@ -1,4 +1,4 @@
-import { storeCheckoutLabel } from './expenseBuild';
+import { storeCheckoutLabel } from './expenseBuild.ts';
 import type { Report, Row } from './types';
 
 export type UnmatchedLabel = {
@@ -20,11 +20,17 @@ function normOrder(v: unknown) {
   return String(v ?? '').trim().toLowerCase().replace(/[^a-z0-9-]/g, '');
 }
 
+function orderKeys(v: unknown): string[] {
+  const n = normOrder(v);
+  if (!n) return [];
+  const stripped = n.replace(/-/g, '');
+  return stripped && stripped !== n ? [n, stripped] : [n];
+}
+
 function saleOrderKeys(s: Row): string[] {
   const keys = new Set<string>();
   for (const raw of [s.receipt_no, s.order_id, s.web_order_no, s.order_no]) {
-    const n = normOrder(raw);
-    if (n) keys.add(n);
+    for (const key of orderKeys(raw)) keys.add(key);
   }
   return [...keys];
 }
@@ -47,6 +53,7 @@ function applyFee(s: Row, f: Row, amount: number) {
   const extra = saleFeeExtras(s);
   if (kind.includes('promoted') || kind.includes('ad') || memo.includes('promoted')) {
     extra.promoted_cents += amount;
+    s.channel_fee_cents = Number(s.channel_fee_cents || 0) + amount;
     if (s.profit_cents != null) s.profit_cents = Number(s.profit_cents) - amount;
   } else if (
     kind.includes('underpaid')
@@ -92,12 +99,48 @@ export function applySaleFeeAdjustments(report: Report): Report {
     let idx: number | undefined;
     if (f.sale_id != null && byId.has(String(f.sale_id))) idx = byId.get(String(f.sale_id));
     else {
-      const order = normOrder(f.order_id);
-      if (order && byOrder.has(order)) idx = byOrder.get(order);
+      for (const key of orderKeys(f.order_id)) {
+        if (byOrder.has(key)) {
+          idx = byOrder.get(key);
+          break;
+        }
+      }
     }
     if (idx == null) continue;
     applyFee(sales[idx], f, amount);
     if (id) attributedFeeIds.add(id);
+  }
+
+  // eBay bills "Promoted Listings - General fee" with no order number.
+  // Those charges belong on the eBay sales, split by sale price, not as a separate expense.
+  const loose: { id: string; amount: number }[] = [];
+  for (const f of report.fees || []) {
+    const id = String(f.id || '');
+    if (id && attributedFeeIds.has(id)) continue;
+    if (String(f.account || '').toLowerCase() === 'pgg124-5') continue;
+    const type = `${f.type || ''} ${f.memo || ''}`.toLowerCase();
+    if (!type.includes('promoted') && !type.includes('ad')) continue;
+    if (orderKeys(f.order_id).length) continue;
+    const amount = Number(f.amount_cents || 0);
+    if (!amount) continue;
+    loose.push({ id, amount });
+  }
+  const pool = loose.reduce((n, row) => n + row.amount, 0);
+  const ebay = sales
+    .map((s, i) => ({ i, price: Math.max(0, Number(s.price_cents || 0)), channel: String(s.channel || '').toLowerCase() }))
+    .filter((s) => s.channel === 'ebay')
+    .sort((a, b) => a.price - b.price);
+  if (loose.length && ebay.length && pool) {
+    const weight = ebay.reduce((n, s) => n + s.price, 0) || ebay.length;
+    let assigned = 0;
+    ebay.forEach((s, idx) => {
+      const basis = s.price || 1;
+      const share = idx === ebay.length - 1 ? pool - assigned : Math.round(pool * basis / weight);
+      assigned += share;
+      if (!share) return;
+      applyFee(sales[s.i], { type: 'promoted' }, share);
+    });
+    for (const row of loose) if (row.id) attributedFeeIds.add(row.id);
   }
   return { ...report, sales, books_attributed_fee_ids: [...attributedFeeIds] };
 }
@@ -121,8 +164,9 @@ function pickSaleIndex(
   opts: { saleId?: unknown; orderId?: unknown; sku?: unknown; channel?: string },
 ): number | undefined {
   if (opts.saleId != null && maps.byId.has(String(opts.saleId))) return maps.byId.get(String(opts.saleId));
-  const order = normOrder(opts.orderId);
-  if (order && maps.byOrder.has(order)) return maps.byOrder.get(order);
+  for (const key of orderKeys(opts.orderId)) {
+    if (maps.byOrder.has(key)) return maps.byOrder.get(key);
+  }
   const sku = String(opts.sku || '').trim();
   if (!sku) return undefined;
   const hits = maps.bySku.get(sku) || [];

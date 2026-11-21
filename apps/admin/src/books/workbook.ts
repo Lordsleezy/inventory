@@ -1,5 +1,5 @@
 import { channelTitle } from './booksMath';
-import { buildExpenses, filterReceived } from './expenseBuild';
+import { buildExpenses, expenseProfitBucket, filterReceived } from './expenseBuild';
 import { loadCommissionOverrides } from './loadPayoutContext';
 import { buildPayouts } from './payoutsBuild';
 import { verifyBooksIntegrity, ledgerOwedFromBalances } from './booksProof';
@@ -64,12 +64,20 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     rows: visible,
     total_cents: counting.reduce((n, e) => n + e.amount_cents, 0),
     reimburse_cents: counting.filter((r) => r.needs_reimbursement).reduce((n, r) => n + r.amount_cents, 0),
-    otherExpenses_cents: counting.filter((r) => !r.countsInProfit).reduce((n, r) => n + r.amount_cents, 0),
+    otherExpenses_cents: counting.filter((r) => expenseProfitBucket(r) === 'operating').reduce((n, r) => n + r.amount_cents, 0),
+    bonus_cents: counting.filter((r) => expenseProfitBucket(r) === 'commission').reduce((n, r) => n + r.amount_cents, 0),
     categoryTotals: [...counting.reduce((m, e) => m.set(e.category, (m.get(e.category) || 0) + e.amount_cents), new Map<string, number>())].map(([category, amount_cents]) => ({ category, amount_cents })),
     exportRows: built.exportRows,
   };
 
-  const computed = computeBooksFromReport(report, payoutCtx, built.otherExpenses_cents, overrides);
+  // Staff keep 30% of the profit on each sale after marketplace fees. The owner keeps the other 70%.
+  // Stored payout cents were figured before those fees, so this report recalculates them.
+  const booksCtx: BooksPayoutContext = {
+    ...payoutCtx,
+    cfg: { ...payoutCtx.cfg, absorbFees: false },
+    frozen: new Map(),
+  };
+  const computed = computeBooksFromReport(report, booksCtx, built.otherExpenses_cents, overrides);
   const saleById = new Map((report.sales || []).map((r) => [String(r.id), r]));
   const salesLines = computed.salesLines.map((s) => {
     const src = saleById.get(s.sale_id) || { id: s.sale_id, profit_cents: s.profit_cents, cost_cents: s.cost_cents };
@@ -80,8 +88,8 @@ export function buildBooksWorkbook(input: WorkbookInput): BooksWorkbook {
     };
   });
 
-  const totals = computed.totals;
-  const payouts = buildPayouts(report, totals, payoutCtx, money, overrides, ledgerBalances);
+  const totals = { ...computed.totals, bonus_cents: built.bonus_cents };
+  const payouts = buildPayouts(report, totals, booksCtx, money, overrides, ledgerBalances);
 
   const ch = new Map<string, { revenue_cents: number; profit_cents: number; count: number }>();
   for (const s of salesLines) {

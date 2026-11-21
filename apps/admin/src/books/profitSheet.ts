@@ -89,7 +89,9 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
 
   const other = Number(wb.expenses?.otherExpenses_cents || 0);
   const expenseTotal = Number(wb.expenses?.total_cents || 0);
-  const commission = Number(wb.sales?.totals?.commission || wb.payouts?.owner?.commission || 0);
+  const bonus = Number(wb.expenses?.bonus_cents || 0);
+  const saleCommission = Number(wb.sales?.totals?.commission || 0);
+  const commission = saleCommission + bonus;
   const giveRows = wb.inventory?.giveaways || [];
   let givenAway = 0;
   let giveUnknown = 0;
@@ -104,8 +106,9 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   const ownerKeeps = wb.payouts?.owner?.ownerKeeps;
 
   const namedCommission = (wb.payouts?.commissions || []).filter((row) => row.role === 'staff').reduce((sum, row) => sum + row.earned_cents, 0);
-  const commissionGap = wb.payouts ? commission - namedCommission : 0;
+  const commissionGap = wb.payouts ? saleCommission - namedCommission : 0;
   const ownerFormula = salesProfit - commission - other;
+  const staffPct = salesProfit > 0 ? Math.round((1000 * saleCommission) / salesProfit) / 10 : null;
   const lines: ProfitLine[] = [
     {
       label: 'Gross merchandise sales',
@@ -140,7 +143,7 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     {
       label: 'Marketplace fees',
       cents: fees,
-      note: 'Sales tab. The Fees, card, label column is marketplace fees plus card fees plus the outbound label. Do not add that column on top of these lines.',
+      note: 'Sales tab. Includes promoted listing fees. When eBay bills those with no order number, they are split across that period\'s eBay sales by sale price and are not deducted again as an expense. The Fees, card, label column is marketplace fees plus card fees plus the outbound label. Do not add that column on top of these lines.',
       role: 'deduction',
     },
     {
@@ -189,16 +192,23 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
       label: 'Operating expenses',
       cents: other,
       note: expenseTotal
-        ? `Expenses tab grand total is ${dollars(expenseTotal)}. ${dollars(expenseTotal - other)} of that is already in the sales and return lines above. This line is the rest.`
+        ? `Expenses tab grand total is ${dollars(expenseTotal)}. ${dollars(Math.max(0, expenseTotal - other - bonus))} of that is already in the sales and return lines above.${bonus ? ` ${dollars(bonus)} is in the commission line.` : ''} This line is the rest.`
         : 'Expenses that are not already on a sale or a return label.',
       role: 'deduction',
     },
     {
       label: 'Commissions',
       cents: commission,
-      note: commissionGap
-        ? `Deducted from profit. Paul and Jacob's earned lines add to ${dollars(namedCommission)}. ${dollars(commissionGap)} is on a commission rule this export does not name. It is not a plug, and it is not deducted twice.`
-        : 'Commission earned on this period\'s sales. The Payouts tab lists Paul and Jacob.',
+      note: [
+        'Staff commission is 30% of the profit on each sale after marketplace fees. The owner keeps the other 70% of that profit. The other costs on this page come out of the owner\'s share.',
+        staffPct != null && Math.abs(staffPct - 30) >= 1
+          ? `On this period the sale commissions are ${staffPct}% of the profit on sales.`
+          : '',
+        bonus ? `This line includes ${dollars(bonus)} of bonuses. A bonus is not deducted again as an expense.` : '',
+        commissionGap
+          ? `Paul and Jacob's sale commissions add to ${dollars(namedCommission)}. ${dollars(commissionGap)} is on a commission rule this export does not name. It is not a plug, and it is not deducted twice.`
+          : 'The Payouts tab lists Paul and Jacob.',
+      ].filter(Boolean).join(' '),
       role: 'deduction',
     },
   );
@@ -271,8 +281,10 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
       label: 'Commission schedule vs profit',
       cents: commissionGap,
       note: commissionGap
-        ? `Paul and Jacob earned ${dollars(namedCommission)}. Profit deducts ${dollars(commission)}. The ${dollars(commissionGap)} difference is unresolved: this export only names those two people.`
-        : 'Paul and Jacob\'s earned commissions add up to the commission deducted in profit.',
+        ? `Paul and Jacob earned ${dollars(namedCommission)} on sales. Profit deducts ${dollars(saleCommission)} of sale commissions${bonus ? ` plus ${dollars(bonus)} of bonuses` : ''}. The ${dollars(commissionGap)} difference is unresolved: this export only names those two people.`
+        : bonus
+          ? `Paul and Jacob's sale commissions add up. This line also includes ${dollars(bonus)} of bonuses.`
+          : 'Paul and Jacob\'s earned commissions add up to the sale commissions deducted in profit.',
       role: 'reconcile',
     });
   }

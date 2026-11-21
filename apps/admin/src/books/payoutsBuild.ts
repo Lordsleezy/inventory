@@ -167,7 +167,7 @@ export function buildPayouts(
       profit: totals.profit,
       commission: totals.commission,
       otherExpenses: totals.otherExpenses,
-      ownerKeeps: totals.profit - totals.commission - totals.otherExpenses,
+      ownerKeeps: totals.profit - totals.commission - totals.otherExpenses - (totals.bonus_cents || 0),
     },
   };
 }

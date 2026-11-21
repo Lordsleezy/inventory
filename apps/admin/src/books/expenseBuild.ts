@@ -1,6 +1,6 @@
-import { isBonusCategory } from '../payouts';
-import { channelTitle } from './booksMath';
-import { pacificDay } from './pacificDay';
+import { isBonusCategory } from '../payouts.ts';
+import { channelTitle } from './booksMath.ts';
+import { pacificDay } from './pacificDay.ts';
 import type { DuplicateNote, ExpenseDisplayLine, ExpenseLine, Report, Row } from './types';
 
 const STORE_CHECKOUT = new Set(['ebay', 'tiktok', 'amazon']);
@@ -85,8 +85,15 @@ export type BuiltExpenses = {
   total_cents: number;
   reimburse_cents: number;
   otherExpenses_cents: number;
+  bonus_cents: number;
   duplicates: DuplicateNote[];
 };
+
+export function expenseProfitBucket(row: { countsInProfit: boolean; category: string }): 'sale' | 'commission' | 'operating' {
+  if (isBonusCategory(row.category)) return 'commission';
+  if (row.countsInProfit) return 'sale';
+  return 'operating';
+}
 
 function detectDuplicates(lines: ExpenseDisplayLine[]): DuplicateNote[] {
   const notes: DuplicateNote[] = [];
@@ -150,20 +157,22 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
       ? `${channelTitle(namedMarket)} balance`
       : marketplaceBalance(String(e.channel || ''));
     const labelOnSale = source === 'manual_label' || source === 'label';
+    const carried = Boolean(e.carried_forward);
     const reimburse = Boolean(e.needs_reimbursement) && !isBonus && !fromBalance;
     const onSale = onSaleExpenseIds.has(String(e.id || '')) || labelOnSale;
     rows.push({
       id: String(e.id || `${e.date}-${title}`),
-      date: String(e.date ?? e.spent_on ?? ''),
+      date: pacificDay(e.date ?? e.spent_on),
       category: fromBalance && category === 'Out-of-pocket shipping' ? 'Returns' : category,
-      title,
+      title: carried ? `${title} · still unpaid from an earlier month` : title,
       amount_cents: Number(e.amount_cents || 0),
       sourceDisplay: fromBalance || (reimburse ? (person || 'Person') : (source === 'manual' ? 'Store' : channelTitle(source) || 'Store')),
       sku_or_order: publicRef(String(e.order_id || e.external_id || ''), sku),
       needs_reimbursement: reimburse,
-      countsInProfit: onSale || Boolean(fromBalance),
+      countsInProfit: !carried && (onSale || Boolean(fromBalance)),
       kindKey: category,
       excludeFromTotals: false,
+      carried,
     });
   }
 
@@ -261,7 +270,7 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     rows.push({
       id: `promoted-roll:${g.account}`,
       category: 'Promoted listings',
-      title: `eBay promoted · ${g.account}`,
+      title: `Promoted fee not matched to a sale · ${g.account}`,
       amount_cents: g.total,
       date: minD,
       meta: `${g.charges.length} charges · ${range}`,
@@ -308,7 +317,8 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
 
   const total_cents = counting.reduce((n, e) => n + e.amount_cents, 0);
   const reimburse_cents = counting.filter((r) => r.needs_reimbursement).reduce((n, r) => n + r.amount_cents, 0);
-  const otherExpenses_cents = counting.filter((r) => !r.countsInProfit).reduce((n, r) => n + r.amount_cents, 0);
+  const bonus_cents = counting.filter((r) => expenseProfitBucket(r) === 'commission').reduce((n, r) => n + r.amount_cents, 0);
+  const otherExpenses_cents = counting.filter((r) => expenseProfitBucket(r) === 'operating').reduce((n, r) => n + r.amount_cents, 0);
 
   const exportRows: ExpenseLine[] = counting.filter((r) => !r.duplicateFlag).map((r) => ({
     date: r.date,
@@ -319,10 +329,16 @@ export function buildExpenses(report: Report, attributedPromotedIds: Set<string>
     paid_by: r.sourceDisplay || 'Store',
     needs_reimbursement: r.needs_reimbursement ? 'Yes' : 'No',
     source: r.sourceDisplay,
-    treatment: r.countsInProfit ? 'Already in the sales or return lines' : 'Deducted as an operating expense',
+    treatment: expenseProfitBucket(r) === 'commission'
+      ? 'Included in commissions'
+      : r.carried
+        ? 'Unpaid from an earlier month. Stays until it is paid back.'
+        : r.countsInProfit
+          ? 'Already in the sales or return lines'
+          : 'Deducted as an operating expense',
   }));
 
-  return { rows, exportRows, categoryTotals, total_cents, reimburse_cents, otherExpenses_cents, duplicates };
+  return { rows, exportRows, categoryTotals, total_cents, reimburse_cents, otherExpenses_cents, bonus_cents, duplicates };
 }
 
 export function filterReceived(items: Row[]): Row[] {

@@ -51,6 +51,8 @@ export type ExpenseDisplayLine = {
   excludeFromTotals: boolean;
   duplicateFlag?: boolean;
   meta?: string;
+  /** Unpaid reimbursement from before this period. Stays until a payment covers it. */
+  carried?: boolean;
   children?: ExpenseDisplayLine[];
 };
 
@@ -173,6 +175,8 @@ export type BookTotals = {
   expense: number;
   otherExpenses: number;
   ownerKeeps: number;
+  /** Bonuses included in the commission line, not in other expenses. */
+  bonus_cents?: number;
   /** Buyer shipping above label cost (included in derived profit). */
   shippingSurplus: number;
   /** Ledger profit minus derived — should be ~0 after fee attribution. */
@@ -247,6 +251,7 @@ export type BooksWorkbook = {
     total_cents: number;
     reimburse_cents: number;
     otherExpenses_cents: number;
+    bonus_cents?: number;
     duplicates: DuplicateNote[];
   };
   sales: { rows: SalesLine[]; channelTotals: { channel: string; revenue_cents: number; profit_cents: number; count: number }[]; totals: BookTotals };
