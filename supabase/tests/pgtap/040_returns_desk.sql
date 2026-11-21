@@ -1,5 +1,5 @@
 -- Buyer-keeps refunds reduce owner profit and do not void the sale.
--- Worker commissions are not clawed back on returns.
+-- The refund also comes out of Paul and Jacob's commission on that sale.
 begin;
 select plan(15);
 set constraints all immediate;
@@ -68,10 +68,12 @@ select is((select count(*) from public.portal_expenses where source = 'return' a
   0::bigint, 'the refund itself is not a second expense');
 select is((select count(*)::int from public.portal_payout_adjustments a
     join public.sales s on s.id = a.sale_id where s.sku = '11482'),
-  0, 'keep-refund does not claw worker commissions');
-select is((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
-    where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid) > 0, true,
-  'worker commission on the sale stays intact');
+  0, 'keep-refund lowers the frozen commission instead of posting an adjustment');
+select ok((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+    where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid)
+  < (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+    where s.sku = '11483' and c.employee_id = current_setting('test.paul')::uuid),
+  'a partial refund reduces Paul commission below the matching sale');
 
 select lives_ok(
   $q$do $body$
@@ -94,12 +96,15 @@ select lives_ok(
       perform set_config('test.return83', v_return::text, true);
     end
   $body$$q$,
-  'a full refund hits owner profit without clawing paid commission');
+  'a full refund hits owner profit and the commission split');
 
-select is((select count(*)::int from public.portal_payout_adjustments a where a.return_id = current_setting('test.return83')::uuid),
-  0, 'full refund does not create commission clawbacks');
+select ok((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+    where s.sku = '11483' and c.employee_id = current_setting('test.paul')::uuid)
+  < (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+    where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid),
+  'a full refund takes more of Paul commission than the partial');
 select is((select buyer_keep_refund_cents from public.sales where sku = '11483'), 1999, 'owner profit keep-refund takes the full refund');
-select is((select voided_at is null from public.sales where sku = '11483'), true, 'owner-profit refund leaves the sale unvoided so commissions stand');
+select is((select voided_at is null from public.sales where sku = '11483'), true, 'a refund leaves the sale unvoided');
 
 select * from finish();
 rollback;

@@ -609,7 +609,7 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
             {!buyerKeeps && inPerson
               ? 'In person. The unit is here. No shipment.'
               : buyerKeeps
-                ? 'No shipment. Owner profit drops by the refund; commissions do not.'
+                ? 'No shipment. The refund comes out of the split: Paul and Jacob lose their percent, Steve the rest.'
                 : 'Status updates on its own once tracking is added.'}
           </p>
           <button type="button" className="returns-btn returns-btn-primary" disabled={!!busy} onClick={() => void submitNew()}>
@@ -716,8 +716,8 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
             : inStore
               ? 'In-store return. The refund comes off this sale. Choose where the unit goes.'
               : keeps
-                ? 'Owner profit drops by the refund; commissions do not.'
-                : 'Refund comes from eBay. Owner profit drops by the refund; commissions don\'t. Status updates on its own once tracking is added.'}
+                ? 'The refund comes out of the split: Paul and Jacob lose their percent, Steve the rest.'
+                : 'Refund comes from eBay. Paul and Jacob lose their percent of it, Steve the rest. Status updates on its own once tracking is added.'}
         </p>
 
         {showStatusActions && (

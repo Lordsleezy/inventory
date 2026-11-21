@@ -1,4 +1,4 @@
--- Return edits re-flow label expense and owner keep-refund profit (no commission clawbacks).
+-- Return edits re-flow label expense, owner profit, and the commission split.
 begin;
 select plan(16);
 set constraints all immediate;
@@ -69,6 +69,7 @@ select lives_ok(
       select s.id, c.amount_cents into v_sale, v_comm from public.sales s
         join public.sale_commissions c on c.sale_id = s.id and c.employee_id = current_setting('test.paul')::uuid
        where s.sku = '11501';
+      perform set_config('test.comm700', v_comm::text, true);
       insert into public.portal_payout_payments (store_id, employee_id, amount_cents, paid_by, legacy_ticket_key)
       values (current_setting('test.store')::uuid, current_setting('test.paul')::uuid, v_comm, current_setting('test.paul')::uuid, 'paid-11501');
       select id into v_return from public.returns where sku = '11501';
@@ -77,9 +78,10 @@ select lives_ok(
   $body$$q$,
   'edit refund after commission paid still works');
 
-select is((select count(*)::int from public.portal_payout_adjustments a
-    join public.returns r on r.id = a.return_id where r.sku = '11501'),
-  0, 'refund edits do not claw worker commissions');
+select ok((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+    where s.sku = '11501' and c.employee_id = current_setting('test.paul')::uuid)
+  < current_setting('test.comm700')::int,
+  'raising the refund takes more out of Paul commission');
 select is((select buyer_keep_refund_cents from public.sales where sku = '11501'), 900, 'owner profit keep-refund follows the higher refund');
 
 select lives_ok(
