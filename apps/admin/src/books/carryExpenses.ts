@@ -124,6 +124,31 @@ export async function loadUnpaidCarryExpenses(
   });
 }
 
+/** Earlier bonus expenses for people who gave part of a bonus away during this period. */
+export async function loadPriorBonusExpenses(
+  client: SupabaseClient,
+  storeId: string,
+  periodStart: string,
+  adjustments: Row[],
+): Promise<Row[]> {
+  const split = (adjustments || []).some((row) => /bonus/i.test(String(row.reason || '')) && Number(row.amount_cents) < 0);
+  if (!storeId || !periodStart || !split) return [];
+  return eachPage<Row>((from, to) => client
+    .from('portal_expenses')
+    .select('id,spent_on,description,category,amount_cents,employee_id,voided_at')
+    .eq('store_id', storeId)
+    .is('voided_at', null)
+    .lt('spent_on', periodStart)
+    .or('category.ilike.bonus,description.ilike.*bonus*')
+    .order('spent_on', { ascending: true })
+    .range(from, to));
+}
+
+export function attachPriorBonuses<T extends Report>(report: T, rows: Row[]): T {
+  if (!rows.length) return report;
+  return { ...report, prior_bonuses: rows };
+}
+
 export function attachCarryExpenses<T extends Report>(report: T, rows: Row[]): T {
   if (!rows.length) return report;
   const have = new Set((report.expenses || []).map((row) => String(row.id)));

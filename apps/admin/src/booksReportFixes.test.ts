@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { bonusPayoutLines } from './books/bonusPayout.ts';
 import { unpaidCarryCents } from './books/carryExpenses.ts';
 import { buildExpenses } from './books/expenseBuild.ts';
 import { profitStatement } from './books/profitSheet.ts';
@@ -80,6 +81,24 @@ test('a bonus is included in commissions and is not also an operating expense', 
   assert.equal(byLabel.get('Total expenses')?.cents, 0);
   assert.equal(byLabel.get('Net after expenses')?.cents, 60000);
   assert.match(byLabel.get('Bonuses')?.note || '', /Bonus/);
+});
+
+test('a 500 dollar bonus given partly to someone else shows what is left', () => {
+  const names = new Map([['paul-a', 'Paul'], ['paul-b', 'Paul'], ['jacob', 'Jacob']]);
+  const lines = bonusPayoutLines(
+    [{ employee_id: 'jacob', category: 'Bonus', description: 'Bonus', amount_cents: 10000, spent_on: '2026-11-07' }],
+    [{ employee_id: 'paul-a', category: 'Bonus', description: 'fridge bonus', amount_cents: 50000, spent_on: '2026-10-29' }],
+    [
+      { employee_id: 'jacob', amount_cents: 10000, reason: "Bonus $100 from Paul's commission (Nov 19)" },
+      { employee_id: 'paul-b', amount_cents: -10000, reason: 'Bonus to Jacob $100 (from commission)' },
+    ],
+    (id) => names.get(id) || 'Associate',
+  );
+  const byPerson = new Map(lines.map((line) => [line.person, line]));
+  assert.equal(byPerson.get('Paul')?.cents, 40000);
+  assert.equal(byPerson.get('Jacob')?.cents, 20000);
+  assert.match(byPerson.get('Paul')?.note || '', /Was \$500\.00/);
+  assert.match(byPerson.get('Paul')?.note || '', /Jacob/);
 });
 
 test('an unpaid reimbursement from an earlier month stays until a payment covers it', () => {

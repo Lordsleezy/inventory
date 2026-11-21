@@ -19,7 +19,7 @@ import { buildBooksExcel, buildBooksPdf, downloadBytes } from './books/export';
 import { loadBooksPayoutContext, loadCommissionOverrides } from './books/loadPayoutContext';
 import { computePayoutPersonBalances, loadPayoutLedgerData, BOOKS_WORKBOOK_VERSION, type PersonBalance } from './books/payoutLedger';
 import { canonicalPersonKey, mergeEmployeeIds } from './books/personMerge';
-import { attachCarryExpenses, loadUnpaidCarryExpenses } from './books/carryExpenses';
+import { attachCarryExpenses, attachPriorBonuses, loadPriorBonusExpenses, loadUnpaidCarryExpenses } from './books/carryExpenses';
 import { buildBooksWorkbook, loadBooksMoney } from './books/workbook';
 import type { BooksPayoutContext, InventorySummary, Period, ReceivedItem, Report, Row } from './books/types';
 import type { CommissionOverride } from './payouts';
@@ -165,7 +165,8 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const piece = await loadOneMonth(client, month);
         if (storeId) {
           const carry = await loadUnpaidCarryExpenses(client, storeId, month.period_start, month.period_end);
-          piece.report = attachCarryExpenses(piece.report, carry);
+          const priorBonuses = await loadPriorBonusExpenses(client, storeId, month.period_start, piece.report.adjustments || []);
+          piece.report = attachPriorBonuses(attachCarryExpenses(piece.report, carry), priorBonuses);
         }
         const saved = localStorage.getItem(`books-dup-${month.id}`);
         const decisions = saved ? JSON.parse(saved) as Record<string, 'keep' | 'remove'> : {};
@@ -370,7 +371,8 @@ export function BooksPage({ client, storeId: storeIdProp, money, native = false,
         const piece = await loadOneMonth(client, month);
         if (storeId) {
           const carry = await loadUnpaidCarryExpenses(client, storeId, month.period_start, month.period_end);
-          piece.report = attachCarryExpenses(piece.report, carry);
+          const priorBonuses = await loadPriorBonusExpenses(client, storeId, month.period_start, piece.report.adjustments || []);
+          piece.report = attachPriorBonuses(attachCarryExpenses(piece.report, carry), priorBonuses);
         }
         const saved = localStorage.getItem(`books-dup-${month.id}`);
         const decisions = saved ? JSON.parse(saved) as Record<string, 'keep' | 'remove'> : {};
