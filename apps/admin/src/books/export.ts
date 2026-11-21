@@ -19,8 +19,9 @@ import {
   styleHeaderRow,
 } from './exportFormat';
 import { verifyExportTies } from './exportChecks';
-import type { BooksWorkbook, Period, ReceivedItem } from './types';
+import type { BooksWorkbook, Period, ReceivedItem, SalesLine } from './types';
 import { receivedSheetMetrics } from './receivedSummary';
+import { profitStatement, returnSheetRows, type ProfitLine } from './profitSheet';
 
 type SpanSlice = { label: string; workbook: BooksWorkbook };
 type ExportOptions = { title?: string; slices?: SpanSlice[]; word?: string };
@@ -28,6 +29,39 @@ type ExportOptions = { title?: string; slices?: SpanSlice[]; word?: string };
 function tieWarning(wb: BooksWorkbook) {
   const issues = wb.exportTieIssues ?? verifyExportTies(wb);
   return issues.length ? issues.map((i) => i.message).join('; ') : undefined;
+}
+
+function salesColumnTotals(rows: SalesLine[]) {
+  const totals = { price: 0, fees: 0, cost: 0, profit: 0, tax: 0, card: 0, label: 0, ship: 0, commission: 0 };
+  for (const row of rows) {
+    totals.price += row.price_cents || 0;
+    totals.fees += (row.marketplace_fees_cents || 0) + (row.card_fees_cents || 0) + (row.label_cost_cents || 0);
+    totals.cost += row.cost_cents ?? 0;
+    totals.profit += row.profit_cents ?? 0;
+    totals.tax += row.tax_cents || 0;
+    totals.card += row.card_fees_cents || 0;
+    totals.label += row.label_cost_cents || 0;
+    totals.ship += row.buyer_shipping_cents || 0;
+    totals.commission += row.commission_cents ?? 0;
+  }
+  return totals;
+}
+
+function salesTotalCells(totals: ReturnType<typeof salesColumnTotals>) {
+  return [
+    '', '', '', '',
+    moneyCell(totals.price),
+    moneyCell(totals.fees),
+    moneyCell(totals.cost),
+    moneyCell(totals.profit),
+    '',
+    moneyCell(totals.tax),
+    moneyCell(totals.card),
+    moneyCell(totals.label),
+    moneyCell(totals.ship),
+    moneyCell(totals.commission),
+    '',
+  ];
 }
 
 export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: string, options?: ExportOptions) {
@@ -38,14 +72,18 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   const slices = options?.slices && options.slices.length > 1 ? options.slices : null;
   const word = options?.word || 'month';
   const generated = new Date();
+  const groups = slices || [{ label: '', workbook: wb }];
+
+  writeProfitSheet(x, wb, groups, periodLabel, generated);
+  writeReturnsSheet(x, groups, periodLabel, generated);
 
   const wsS = x.addWorksheet('Sales');
   const salesHeader = [
-    'Date', 'SKU', 'Item', 'Channel', 'Sale price', 'Fees', 'Item cost', 'Profit',
+    'Date', 'SKU', 'Item', 'Channel', 'Sale price', 'Fees, card, label', 'Item cost', 'Profit',
     'Order #', 'Sales tax', 'Card fee', 'Shipping label (we paid)', 'Buyer paid shipping', 'Commission', 'Notes',
   ];
   const salesCols = salesHeader.length;
-  const salesWidths = [12, 9, 32, 12, 12, 12, 12, 12, 14, 11, 11, 16, 16, 12, 28];
+  const salesWidths = [12, 9, 32, 12, 12, 18, 12, 12, 14, 11, 11, 16, 16, 12, 28];
   setColumnWidths(wsS, salesWidths);
   addReportTitle(wsS, 'Sales', periodLabel, generated, salesCols);
   fitTitleRows(wsS, salesCols, salesWidths);
@@ -80,11 +118,11 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     ]);
     }
     if (group.label) {
-      const sub = group.workbook.sales.totals;
-      const row = wsS.addRow(['', '', '', '', moneyCell(sub.revenue), '', moneyCell(sub.cost), moneyCell(sub.profit), '', '', '', '', '', moneyCell(sub.commission), '']);
+      const sub = salesColumnTotals(group.workbook.sales.rows);
+      const row = wsS.addRow(salesTotalCells(sub));
       mergeLabelRow(wsS, row.number, 1, 4, `${group.label} subtotal`);
       row.font = { bold: true };
-      for (const c of [5, 7, 8, 14]) row.getCell(c).numFmt = MONEY_FMT;
+      for (const c of [5, 6, 7, 8, 10, 11, 12, 13, 14]) row.getCell(c).numFmt = MONEY_FMT;
     }
   }
   const dataEndS = wsS.rowCount;
@@ -99,19 +137,28 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     }
   }
   wsS.addRow([]);
-  for (const c of wb.sales.channelTotals) {
-    const row = wsS.addRow(['', '', '', '', moneyCell(c.revenue_cents), '', '', moneyCell(c.profit_cents)]);
-    mergeLabelRow(wsS, row.number, 1, 4, `${c.channel} subtotal`);
-    row.font = { bold: true };
-    row.getCell(5).numFmt = MONEY_FMT;
-    row.getCell(8).numFmt = MONEY_FMT;
+  const byChannel = new Map<string, SalesLine[]>();
+  for (const sale of wb.sales.rows) {
+    const list = byChannel.get(sale.channel) || [];
+    list.push(sale);
+    byChannel.set(sale.channel, list);
   }
-  const t = wb.sales.totals;
-  const tot = wsS.addRow(['', '', '', '', moneyCell(t.revenue), '', moneyCell(t.cost), moneyCell(t.profit), '', '', '', '', '', moneyCell(t.commission), '']);
-  mergeLabelRow(wsS, tot.number, 1, 4, 'Period grand total');
+  for (const [channel, rows] of [...byChannel.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const row = wsS.addRow(salesTotalCells(salesColumnTotals(rows)));
+    mergeLabelRow(wsS, row.number, 1, 4, `${channel} subtotal`);
+    row.font = { bold: true };
+    for (const c of [5, 6, 7, 8, 10, 11, 12, 13, 14]) row.getCell(c).numFmt = MONEY_FMT;
+  }
+  const grand = salesColumnTotals(wb.sales.rows);
+  const tot = wsS.addRow(salesTotalCells(grand));
+  mergeLabelRow(wsS, tot.number, 1, 4, 'Column totals');
   tot.font = { bold: true };
   tot.border = { top: { style: 'medium' } };
-  for (const c of [5, 7, 8, 14]) tot.getCell(c).numFmt = MONEY_FMT;
+  for (const c of [5, 6, 7, 8, 10, 11, 12, 13, 14]) tot.getCell(c).numFmt = MONEY_FMT;
+  const tie = wsS.addRow(['Sale price plus buyer paid shipping is the sales total. Fees, card, label is marketplace fees, the card fee, and the shipping label added together. Card fee and Shipping label are also in their own columns, so do not add them again. Sales tax is not part of the sale price.']);
+  mergeLabelRow(wsS, tie.number, 1, salesCols, String(tie.getCell(1).value || ''));
+  tie.getCell(1).alignment = { wrapText: true, vertical: 'middle' };
+  tie.height = 36;
   const audit = wb.costAudit;
   if (audit && (audit.missing.length || audit.flaggedDefaults.length)) {
     wsS.addRow([]);
@@ -350,6 +397,117 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   })), periodLabel, generated);
 
   return x.xlsx.writeBuffer();
+}
+
+function writeProfitSheet(
+  book: ExcelJS.Workbook,
+  wb: BooksWorkbook,
+  groups: SpanSlice[],
+  periodLabel: string,
+  generated: Date,
+) {
+  const ws = book.addWorksheet('Profits');
+  const widths = [32, 16, 62];
+  setColumnWidths(ws, widths);
+  addReportTitle(ws, 'Profits', periodLabel, generated, 3);
+  const headerAt = ws.rowCount + 1;
+  ws.addRow(['', 'Amount', 'Notes']);
+  styleHeaderRow(ws, headerAt, 3);
+  const writeLines = (lines: ProfitLine[]) => {
+    const start = ws.rowCount + 1;
+    for (const line of lines) {
+      const cents = line.role === 'deduction' ? -line.cents : line.cents;
+      const row = ws.addRow([line.label, moneyCell(cents), line.note]);
+      row.getCell(2).numFmt = MONEY_FMT;
+      row.getCell(1).alignment = { vertical: 'middle', wrapText: false };
+      row.getCell(3).alignment = { vertical: 'middle', wrapText: true };
+      if (line.role === 'subtotal' || line.role === 'profit') {
+        row.font = { bold: true };
+        row.border = { top: { style: line.role === 'profit' ? 'medium' : 'thin' } };
+      }
+    }
+    bandRows(ws, start, ws.rowCount);
+  };
+  writeLines(profitStatement(wb));
+  fitWrappedRowHeights(ws, headerAt, ws.rowCount, widths);
+  if (groups.length > 1) {
+    ws.addRow([]);
+    const head = ws.addRow(['Each month']);
+    head.font = { bold: true, size: 12 };
+    for (const group of groups) {
+      const profit = profitStatement(group.workbook).find((line) => line.role === 'profit');
+      const row = ws.addRow([group.label, moneyCell(profit?.cents ?? 0), '']);
+      row.getCell(2).numFmt = MONEY_FMT;
+      row.font = { bold: true };
+    }
+  }
+  fitTitleRows(ws, 3, widths);
+  setNormalSheetView(ws);
+  setupPrint(ws, headerAt, { onePage: true });
+}
+
+function writeReturnsSheet(book: ExcelJS.Workbook, groups: SpanSlice[], periodLabel: string, generated: Date) {
+  const ws = book.addWorksheet('Returns');
+  const header = ['Date', 'SKU', 'Order', 'Channel', 'Status', 'What happened', 'Refund', 'Return shipping', 'In the profit'];
+  const widths = [14, 12, 18, 14, 24, 24, 14, 16, 14];
+  setColumnWidths(ws, widths);
+  addReportTitle(ws, 'Returns', periodLabel, generated, header.length);
+  const note = ws.addRow(['Yes means the refund is taken out on the Profits tab. Not yet means the return is still open, so it is listed and not taken out. Return shipping is taken out on Profits either way, unless the return was canceled.']);
+  mergeLabelRow(ws, note.number, 1, header.length, String(note.getCell(1).value || ''));
+  let headerAt = 0;
+  for (const group of groups) {
+    const rows = returnSheetRows(group.workbook.inventory?.returns || []);
+    if (group.label) {
+      ws.addRow([]);
+      const head = ws.addRow([group.label]);
+      mergeLabelRow(ws, head.number, 1, header.length, group.label);
+      head.font = { bold: true, size: 12 };
+    }
+    ws.addRow(header);
+    headerAt = headerAt || ws.rowCount;
+    styleHeaderRow(ws, ws.rowCount, header.length);
+    const start = ws.rowCount + 1;
+    if (!rows.length) {
+      const empty = ws.addRow(['No returns']);
+      mergeLabelRow(ws, empty.number, 1, header.length, 'No returns');
+    }
+    for (const row of rows) {
+      const line = ws.addRow([
+        excelDate(row.date),
+        row.sku,
+        row.order,
+        row.channel,
+        row.status,
+        row.what,
+        moneyCell(row.refundCents),
+        moneyCell(row.labelCents),
+        row.inProfit,
+      ]);
+      line.getCell(1).numFmt = 'mmm d, yyyy';
+      line.getCell(7).numFmt = MONEY_FMT;
+      line.getCell(8).numFmt = MONEY_FMT;
+    }
+    if (rows.length) {
+      const taken = rows.filter((row) => row.inProfit === 'Yes').reduce((sum, row) => sum + row.refundCents, 0);
+      const open = rows.filter((row) => row.inProfit === 'Not yet').reduce((sum, row) => sum + row.refundCents, 0);
+      const skipped = rows.filter((row) => row.inProfit === 'No').reduce((sum, row) => sum + row.refundCents, 0);
+      const labels = rows.filter((row) => row.status !== 'Canceled').reduce((sum, row) => sum + row.labelCents, 0);
+      const addTotal = (label: string, refund: number | null, shipping: number | null) => {
+        const total = ws.addRow(['', '', '', '', '', label, refund == null ? null : moneyCell(refund), shipping == null ? null : moneyCell(shipping), '']);
+        total.font = { bold: true };
+        if (refund != null) total.getCell(7).numFmt = MONEY_FMT;
+        if (shipping != null) total.getCell(8).numFmt = MONEY_FMT;
+      };
+      addTotal('Refunds taken out on Profits', taken, null);
+      addTotal('Open, not taken out yet', open, null);
+      if (skipped) addTotal('Denied or canceled', skipped, null);
+      addTotal('Return shipping taken out on Profits', null, labels);
+    }
+    if (start <= ws.rowCount) bandRows(ws, start, ws.rowCount);
+  }
+  fitTitleRows(ws, header.length, widths);
+  setNormalSheetView(ws);
+  setupPrint(ws, headerAt || 4, { repeatHeader: true });
 }
 
 type ReceivedGroup = { label: string; items: ReceivedItem[]; manifested: number };
