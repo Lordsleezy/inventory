@@ -451,17 +451,18 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   const ownerLines = profitStatement(wb);
   const ownerStep = (label: string) => ownerLines.find((step) => step.label === label);
   const ownerRows: [string, number][] = [['Sales contribution', ownerStep('Sales contribution')?.cents ?? p.owner.profit]];
-  for (const label of ['Return shipping', 'Operating expenses', 'Commissions', 'Given away', 'Replacement cost']) {
-    const cents = ownerStep(label)?.cents || 0;
-    if (cents) ownerRows.push([`− ${label}`, cents]);
-  }
-  ownerRows.push(['= Owner keeps', ownerLines.find((step) => step.role === 'profit')?.cents ?? 0]);
+  const commissionCents = ownerStep('Commissions')?.cents || 0;
+  if (commissionCents) ownerRows.push(['− Commissions (30%)', commissionCents]);
+  ownerRows.push(['= Owner profit (70%)', ownerLines.find((step) => step.role === 'profit')?.cents ?? 0]);
+  const expenseCents = ownerStep('Total expenses')?.cents || 0;
+  if (expenseCents) ownerRows.push(['− Total expenses', expenseCents]);
+  ownerRows.push(['= Net after expenses', ownerLines.find((step) => step.role === 'net')?.cents ?? 0]);
   for (const [label, cents] of ownerRows) {
     const row = wsP.addRow([label, moneyCell(label.startsWith('−') ? -cents : cents)]);
     if (label.startsWith('=')) row.font = { bold: true };
     row.getCell(2).numFmt = MONEY_FMT;
   }
-  const ownerNote = wsP.addRow(['What is left after these costs goes to the owner. There is no separate business profit. This is not cash in the bank.']);
+  const ownerNote = wsP.addRow(['The owner gets 70% of the profit on sales. Associates get 30%. Expenses, including anything still unpaid from an earlier month, come off after that. The net is not cash in the bank.']);
   mergeLabelRow(wsP, ownerNote.number, 1, 5, String(ownerNote.getCell(1).value || ''));
   ownerNote.height = 28;
   wrapDataRows(wsP, hP, wsP.rowCount, 5);
@@ -523,7 +524,7 @@ function writeStartSheet(
   section('Result');
   const bridgeStart = lines.findIndex((step) => step.label === 'Gross merchandise sales');
   const bridge = lines.slice(bridgeStart >= 0 ? bridgeStart : 0).filter((step) =>
-    step.role === 'amount' || step.role === 'deduction' || step.role === 'subtotal' || step.role === 'profit');
+    step.role === 'amount' || step.role === 'deduction' || step.role === 'subtotal' || step.role === 'profit' || step.role === 'net');
   const brief: Record<string, string> = {
     'Gross merchandise sales': 'Item prices before refunds, so the next line can take the refunds out.',
     'Completed refunds': 'Refunds already paid. Taken out of the sales above.',
@@ -535,19 +536,17 @@ function writeStartSheet(
     'Outbound shipping': 'Labels we paid to ship the orders.',
     'Sales left out, cost missing': 'These sales have no item cost, so they are pulled out. Nothing was estimated.',
     'Match the Sales tab': 'Makes this total match the Profit column on Sales.',
-    'Sales contribution': 'What is left on the sales, before the costs below.',
-    'Return shipping': 'Labels we paid to get items back.',
-    'Operating expenses': 'Expenses that are not already in the lines above.',
-    'Commissions': 'Commission earned on this period\'s sales.',
-    'Given away': 'Recorded cost of items given away.',
-    'Replacement cost': 'Extra cost of replacements.',
-    'Owner keeps': 'What is left goes to the owner. It is not a separate business balance, and it is not cash in the bank.',
+    'Sales contribution': 'Profit on the sales. Associates get 30% of this. The owner gets 70%.',
+    'Commissions': '30% of the profit on sales. The owner\'s line is the other 70%.',
+    'Owner profit': '70% of the profit on sales. Larger than commissions. Expenses are not taken out of this.',
+    'Total expenses': 'Expenses this month, plus anything still unpaid from an earlier month. Not taken out of the 70%.',
+    'Net after expenses': 'Owner\'s 70% minus those expenses. Not cash in the bank.',
   };
   for (const step of bridge) {
     if (step.role === 'deduction' && !step.cents) continue;
     const signed = step.role === 'deduction' ? -step.cents : step.cents;
     const row = line(step.label, show(signed), brief[step.label] || step.note);
-    if (step.role === 'subtotal' || step.role === 'profit') row.font = { bold: true };
+    if (step.role === 'subtotal' || step.role === 'profit' || step.role === 'net') row.font = { bold: true };
     if (step.label === 'Completed refunds' || (step.label === 'Gross merchandise sales' && !find('Completed refunds')?.cents)) {
       const openReturns = find('Open returns');
       line('Open returns', openReturns ? moneyCell(openReturns.cents) : 'None', openReturns ? 'Still open. Not taken out of the total yet.' : 'No open refund amount on this export.');
@@ -585,7 +584,7 @@ function writeStartSheet(
     section('Each period in this file');
     for (const group of groups) {
       const monthProfit = profitStatement(group.workbook).find((row) => row.role === 'profit');
-      line(group.label, show(monthProfit?.cents), 'What the owner keeps for that slice. A slice that is still open is not a finished month.');
+      line(group.label, show(monthProfit?.cents), 'The owner\'s 70% of the profit on sales for that slice. Expenses are under that line.');
     }
   } else {
     line('Previous period', 'Not available', 'This file has one period, so a comparison is not included.');
@@ -636,14 +635,14 @@ function writeProfitSheet(
       if (!line.text) row.getCell(2).numFmt = MONEY_FMT;
       row.getCell(1).alignment = { vertical: 'middle', wrapText: true };
       row.getCell(3).alignment = { vertical: 'middle', wrapText: true };
-      if (line.role === 'subtotal' || line.role === 'profit') {
+      if (line.role === 'subtotal' || line.role === 'profit' || line.role === 'net') {
         row.font = { bold: true };
-        row.border = { top: { style: line.role === 'profit' ? 'medium' : 'thin' } };
+        row.border = { top: { style: line.role === 'profit' || line.role === 'net' ? 'medium' : 'thin' } };
       }
     }
     if (start <= ws.rowCount) bandRows(ws, start, ws.rowCount);
   };
-  writeLines(statement.filter((line) => line.role === 'amount' || line.role === 'deduction' || line.role === 'subtotal' || line.role === 'profit'));
+  writeLines(statement.filter((line) => line.role === 'amount' || line.role === 'deduction' || line.role === 'subtotal' || line.role === 'profit' || line.role === 'net'));
   const info = statement.filter((line) => line.role === 'info');
   if (info.length) {
     ws.addRow([]);

@@ -12,7 +12,7 @@ export type ProfitLine = {
   /** Positive. Deductions are stored positive and written as a minus on the sheet. */
   cents: number;
   note: string;
-  role: 'amount' | 'deduction' | 'info' | 'subtotal' | 'profit' | 'reconcile';
+  role: 'amount' | 'deduction' | 'info' | 'subtotal' | 'profit' | 'net' | 'reconcile';
   /** Shown instead of a dollar amount when the figure is a count or a label. */
   text?: string;
 };
@@ -90,8 +90,6 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   const other = Number(wb.expenses?.otherExpenses_cents || 0);
   const expenseTotal = Number(wb.expenses?.total_cents || 0);
   const bonus = Number(wb.expenses?.bonus_cents || 0);
-  const saleCommission = Number(wb.sales?.totals?.commission || 0);
-  const commission = saleCommission + bonus;
   const giveRows = wb.inventory?.giveaways || [];
   let givenAway = 0;
   let giveUnknown = 0;
@@ -102,13 +100,16 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   }
   const replacements = (wb.inventory?.replacements || []).reduce((sum, row) => sum + Number(row.extra_cost_cents || 0), 0);
   const salesProfit = columnProfit;
-  const profitCents = salesProfit - returnShip - other - commission - givenAway - replacements;
-  const ownerKeeps = wb.payouts?.owner?.ownerKeeps;
-
+  const carried = (wb.expenses?.rows || [])
+    .filter((row) => row.carried && !row.excludeFromTotals)
+    .reduce((sum, row) => sum + row.amount_cents, 0);
+  // Associates get 30% of the profit on sales. The owner gets the other 70%.
+  // Expenses, including anything still unpaid from an earlier month, come off after that split.
+  const commission = salesProfit > 0 ? Math.round(salesProfit * 30 / 100) : 0;
+  const ownerProfit = salesProfit - commission;
+  const totalExpenses = other + returnShip + givenAway + replacements;
+  const netAfterExpenses = ownerProfit - totalExpenses;
   const namedCommission = (wb.payouts?.commissions || []).filter((row) => row.role === 'staff').reduce((sum, row) => sum + row.earned_cents, 0);
-  const commissionGap = wb.payouts ? saleCommission - namedCommission : 0;
-  const ownerFormula = salesProfit - commission - other;
-  const staffPct = salesProfit > 0 ? Math.round((1000 * saleCommission) / salesProfit) / 10 : null;
   const lines: ProfitLine[] = [
     {
       label: 'Gross merchandise sales',
@@ -179,48 +180,22 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     {
       label: 'Sales contribution',
       cents: salesProfit,
-      note: 'Equals the Profit column on the Sales tab. This is profit on the sales that have an item cost, before return shipping, operating expenses, and commissions.',
+      note: 'Equals the Profit column on the Sales tab. Associates get 30% of this. The owner gets the other 70%. Expenses are not taken out of either share.',
       role: 'subtotal',
-    },
-    {
-      label: 'Return shipping',
-      cents: returnShip,
-      note: 'Returns tab. Labels we paid to get items back, except canceled returns. Sales contribution does not subtract this.',
-      role: 'deduction',
-    },
-    {
-      label: 'Operating expenses',
-      cents: other,
-      note: expenseTotal
-        ? `Expenses tab grand total is ${dollars(expenseTotal)}. ${dollars(Math.max(0, expenseTotal - other - bonus))} of that is already in the sales and return lines above.${bonus ? ` ${dollars(bonus)} is in the commission line.` : ''} This line is the rest.`
-        : 'Expenses that are not already on a sale or a return label.',
-      role: 'deduction',
     },
     {
       label: 'Commissions',
       cents: commission,
       note: [
-        'Staff commission is 30% of the profit on each sale after marketplace fees. The owner keeps the other 70% of that profit. The other costs on this page come out of the owner\'s share.',
-        staffPct != null && Math.abs(staffPct - 30) >= 1
-          ? `On this period the sale commissions are ${staffPct}% of the profit on sales.`
+        '30% of the profit on sales. The owner\'s line is the other 70%, so it is larger than this.',
+        bonus ? `Bonuses are paid inside this 30%. A bonus is not deducted again.` : '',
+        namedCommission
+          ? `Payouts lists ${dollars(namedCommission)} earned by Paul and Jacob on the sale rules. This line is the 30% split of the profit above.`
           : '',
-        bonus ? `This line includes ${dollars(bonus)} of bonuses. A bonus is not deducted again as an expense.` : '',
-        commissionGap
-          ? `Paul and Jacob's sale commissions add to ${dollars(namedCommission)}. ${dollars(commissionGap)} is on a commission rule this export does not name. It is not a plug, and it is not deducted twice.`
-          : 'The Payouts tab lists Paul and Jacob.',
       ].filter(Boolean).join(' '),
       role: 'deduction',
     },
   );
-  if (givenAway) {
-    lines.push({
-      label: 'Given away',
-      cents: givenAway,
-      note: 'Inventory tab. Recorded cost of items given away. Not on a sale.'
-        + (giveUnknown ? ` ${giveUnknown} more have no cost and are not in this amount. Nothing was estimated.` : ''),
-      role: 'deduction',
-    });
-  }
   if (giveUnknown && !givenAway) {
     lines.push({
       label: 'Giveaways missing a cost',
@@ -230,19 +205,31 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
       role: 'info',
     });
   }
-  if (replacements) {
-    lines.push({
-      label: 'Replacement cost',
-      cents: replacements,
-      note: 'Inventory tab. Extra cost of replacements. Not on a sale.',
-      role: 'deduction',
-    });
-  }
+  const expenseParts = [
+    other ? `${dollars(other)} entered as expenses` : '',
+    carried ? `${dollars(carried)} of that is still unpaid from an earlier month` : 'Nothing from an earlier month is still unpaid',
+    returnShip ? `${dollars(returnShip)} return shipping` : '',
+    givenAway ? `${dollars(givenAway)} cost of items given away` : '',
+    replacements ? `${dollars(replacements)} replacement cost` : '',
+    expenseTotal ? `The Expenses tab grand total is ${dollars(expenseTotal)}. Amounts already inside the sales and return lines above are not in this total again.` : '',
+  ].filter(Boolean);
   lines.push({
-    label: 'Owner keeps',
-    cents: profitCents,
-    note: 'What is left after the costs above goes to the owner. There is no separate business profit. It is not cash in the bank.',
+    label: 'Owner profit',
+    cents: ownerProfit,
+    note: '70% of the profit on sales. Associates\' commissions are the other 30%. Expenses are not taken out of this. It is not cash in the bank.',
     role: 'profit',
+  });
+  lines.push({
+    label: 'Total expenses',
+    cents: totalExpenses,
+    note: expenseParts.join('. ') + '.',
+    role: 'deduction',
+  });
+  lines.push({
+    label: 'Net after expenses',
+    cents: netAfterExpenses,
+    note: 'Owner\'s 70% minus the expenses above, including anything still unpaid from an earlier month. It is not cash in the bank.',
+    role: 'net',
   });
   lines.push(
     {
@@ -266,26 +253,6 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
       cents: openRefunds,
       note: 'Requested or still in progress. Not deducted. They come out of profit when the sale is voided. An open return is not counted as back in stock.',
       role: 'info',
-    });
-  }
-  if (ownerKeeps != null && ownerKeeps !== ownerFormula) {
-    lines.push({
-      label: 'Owner keeps does not match',
-      cents: ownerKeeps - ownerFormula,
-      note: 'The stored owner figure does not equal sales contribution minus commissions minus operating expenses. The difference is unresolved.',
-      role: 'reconcile',
-    });
-  }
-  if (wb.payouts) {
-    lines.push({
-      label: 'Commission schedule vs profit',
-      cents: commissionGap,
-      note: commissionGap
-        ? `Paul and Jacob earned ${dollars(namedCommission)} on sales. Profit deducts ${dollars(saleCommission)} of sale commissions${bonus ? ` plus ${dollars(bonus)} of bonuses` : ''}. The ${dollars(commissionGap)} difference is unresolved: this export only names those two people.`
-        : bonus
-          ? `Paul and Jacob's sale commissions add up. This line also includes ${dollars(bonus)} of bonuses.`
-          : 'Paul and Jacob\'s earned commissions add up to the sale commissions deducted in profit.',
-      role: 'reconcile',
     });
   }
   return lines;

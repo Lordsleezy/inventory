@@ -50,17 +50,17 @@ test('profit is sales after tax is shown, and shipping, fees, refunds, and cost 
   assert.equal(byLabel.get('Card fees')?.cents, 300);
   assert.equal(byLabel.get('Open returns')?.cents, 1500);
   assert.equal(byLabel.get('Open returns')?.role, 'info');
-  assert.equal(byLabel.get('Return shipping')?.cents, 700);
   assert.equal(byLabel.get('Cost of goods sold')?.cents, 2000);
   assert.equal(byLabel.get('Sales left out, cost missing')?.cents, 1500 - 100);
+  const commission = Math.round(pricedProfit * 30 / 100);
   assert.equal(byLabel.get('Sales contribution')?.cents, pricedProfit);
-  assert.equal(byLabel.get('Operating expenses')?.cents, 0);
-  assert.equal(byLabel.get('Commissions')?.cents, 0);
-  assert.equal(byLabel.get('Owner keeps')?.cents, pricedProfit - 700);
-  assert.equal(byLabel.get('Owner keeps')?.role, 'profit');
-  const added = lines.filter((line) => line.role === 'amount').reduce((sum, line) => sum + line.cents, 0);
-  const taken = lines.filter((line) => line.role === 'deduction').reduce((sum, line) => sum + line.cents, 0);
-  assert.equal(added - taken, byLabel.get('Owner keeps')?.cents);
+  assert.equal(byLabel.get('Return shipping'), undefined);
+  assert.equal(byLabel.get('Commissions')?.cents, commission);
+  assert.equal(byLabel.get('Owner profit')?.cents, pricedProfit - commission);
+  assert.equal(byLabel.get('Owner profit')?.role, 'profit');
+  assert.equal(byLabel.get('Total expenses')?.cents, 700);
+  assert.equal(byLabel.get('Net after expenses')?.cents, pricedProfit - commission - 700);
+  assert.ok((byLabel.get('Owner profit')?.cents || 0) > commission);
 
   const listed = returnSheetRows([
     { sku: '12153', order_id: '240352', channel: 'ebay', status: 'refunded_no_return', refund_cents: 2000, date: '2026-11-12', buyer_keeps_item: true },
@@ -91,9 +91,9 @@ test('in-store card fees stay out, and expenses, commissions, and giveaways come
   assert.equal(byLabel.get('Card fees the customer paid')?.cents, 60);
   assert.equal(byLabel.get('Card fees the customer paid')?.role, 'info');
   assert.equal(byLabel.get('Sales contribution')?.cents, 1500);
-  assert.equal(byLabel.get('Operating expenses')?.cents, 250);
-  assert.equal(byLabel.get('Commissions')?.cents, 300);
-  assert.equal(byLabel.get('Given away')?.cents, 125);
-  assert.equal(byLabel.get('Owner keeps')?.cents, 1500 - 250 - 300 - 125);
-  assert.match(byLabel.get('Owner keeps')?.note || '', /goes to the owner/);
+  assert.equal(byLabel.get('Commissions')?.cents, 450);
+  assert.equal(byLabel.get('Owner profit')?.cents, 1050);
+  assert.equal(byLabel.get('Total expenses')?.cents, 250 + 125);
+  assert.equal(byLabel.get('Net after expenses')?.cents, 1050 - 375);
+  assert.match(byLabel.get('Owner profit')?.note || '', /70%/);
 });
