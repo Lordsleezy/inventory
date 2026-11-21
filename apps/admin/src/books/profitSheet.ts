@@ -103,13 +103,17 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   const carried = (wb.expenses?.rows || [])
     .filter((row) => row.carried && !row.excludeFromTotals)
     .reduce((sum, row) => sum + row.amount_cents, 0);
-  // Associates get 30% of the profit on sales. The owner gets the other 70%.
-  // Expenses, including anything still unpaid from an earlier month, come off after that split.
-  const commission = salesProfit > 0 ? Math.round(salesProfit * 30 / 100) : 0;
-  const ownerProfit = salesProfit - commission;
+  const bonusRows = (wb.expenses?.rows || []).filter((row) => !row.excludeFromTotals && String(row.category || '').toLowerCase() === 'bonus');
+  const bonusPay = bonusRows.length ? bonusRows.reduce((sum, row) => sum + row.amount_cents, 0) : bonus;
+  const staffRows = (wb.payouts?.commissions || []).filter((row) => row.role === 'staff');
+  // Floor's number: the commission saved on each sale for Paul and Jacob, plus bonuses entered on Expenses.
+  const saleCommission = staffRows.length
+    ? staffRows.reduce((sum, row) => sum + row.earned_cents, 0)
+    : sum(sales, (row) => row.cost_cents == null ? 0 : (row.commission_cents || 0));
+  const commission = saleCommission;
+  const ownerProfit = salesProfit - commission - bonusPay;
   const totalExpenses = other + returnShip + givenAway + replacements;
   const netAfterExpenses = ownerProfit - totalExpenses;
-  const namedCommission = (wb.payouts?.commissions || []).filter((row) => row.role === 'staff').reduce((sum, row) => sum + row.earned_cents, 0);
   const lines: ProfitLine[] = [
     {
       label: 'Gross merchandise sales',
@@ -138,7 +142,7 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     {
       label: 'Cost of goods sold',
       cents: cost,
-      note: 'Sales tab, Item cost column, for sales that have a cost. A blank cost is not treated as $0.',
+      note: 'Sales tab, Item cost column. Each amount is the cost saved on that item in Floor. A blank cost is not treated as $0.',
       role: 'deduction',
     },
     {
@@ -180,19 +184,23 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
     {
       label: 'Sales contribution',
       cents: salesProfit,
-      note: 'Equals the Profit column on the Sales tab. Associates get 30% of this. The owner gets the other 70%. Expenses are not taken out of either share.',
+      note: 'Equals the Profit column on the Sales tab, which uses the same sale profit as Floor. Commissions are the amounts Floor saved on these sales. The owner keeps the rest. Expenses come off after that.',
       role: 'subtotal',
     },
     {
       label: 'Commissions',
       cents: commission,
-      note: [
-        '30% of the profit on sales. The owner\'s line is the other 70%, so it is larger than this.',
-        bonus ? `Bonuses are paid inside this 30%. A bonus is not deducted again.` : '',
-        namedCommission
-          ? `Payouts lists ${dollars(namedCommission)} earned by Paul and Jacob on the sale rules. This line is the 30% split of the profit above.`
-          : '',
-      ].filter(Boolean).join(' '),
+      note: saleCommission
+        ? `${dollars(saleCommission)} is the commission Floor saved on these sales for Paul and Jacob. Bonuses are the next line.`
+        : 'No sale commission was saved on these sales. Bonuses are the next line.',
+      role: 'deduction',
+    },
+    {
+      label: 'Bonuses',
+      cents: bonusPay,
+      note: bonusRows.length
+        ? bonusRows.map((row) => `${row.date ? `${row.date} ` : ''}${row.title} ${dollars(row.amount_cents)}`).join('; ') + '. Entered on Expenses. Not inside the commission line above.'
+        : (bonusPay ? `${dollars(bonusPay)} entered on Expenses. Not inside the commission line above.` : 'No bonus entered this month.'),
       role: 'deduction',
     },
   );
@@ -216,7 +224,7 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   lines.push({
     label: 'Owner profit',
     cents: ownerProfit,
-    note: '70% of the profit on sales. Associates\' commissions are the other 30%. Expenses are not taken out of this. It is not cash in the bank.',
+    note: 'Profit on sales minus the commissions and bonuses above. Expenses are not taken out of this. It is not cash in the bank.',
     role: 'profit',
   });
   lines.push({
@@ -228,7 +236,7 @@ export function profitStatement(wb: BooksWorkbook): ProfitLine[] {
   lines.push({
     label: 'Net after expenses',
     cents: netAfterExpenses,
-    note: 'Owner\'s 70% minus the expenses above, including anything still unpaid from an earlier month. It is not cash in the bank.',
+    note: 'Owner profit minus the expenses above, including anything still unpaid from an earlier month. It is not cash in the bank.',
     role: 'net',
   });
   lines.push(

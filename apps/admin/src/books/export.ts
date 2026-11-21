@@ -452,8 +452,9 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
   const ownerStep = (label: string) => ownerLines.find((step) => step.label === label);
   const ownerRows: [string, number][] = [['Sales contribution', ownerStep('Sales contribution')?.cents ?? p.owner.profit]];
   const commissionCents = ownerStep('Commissions')?.cents || 0;
-  if (commissionCents) ownerRows.push(['− Commissions (30%)', commissionCents]);
-  ownerRows.push(['= Owner profit (70%)', ownerLines.find((step) => step.role === 'profit')?.cents ?? 0]);
+  if (commissionCents) ownerRows.push(['− Commissions', commissionCents]);
+  ownerRows.push(['− Bonuses', ownerStep('Bonuses')?.cents || 0]);
+  ownerRows.push(['= Owner profit', ownerLines.find((step) => step.role === 'profit')?.cents ?? 0]);
   const expenseCents = ownerStep('Total expenses')?.cents || 0;
   if (expenseCents) ownerRows.push(['− Total expenses', expenseCents]);
   ownerRows.push(['= Net after expenses', ownerLines.find((step) => step.role === 'net')?.cents ?? 0]);
@@ -462,7 +463,7 @@ export async function buildBooksExcel(period: Period, wb: BooksWorkbook, label: 
     if (label.startsWith('=')) row.font = { bold: true };
     row.getCell(2).numFmt = MONEY_FMT;
   }
-  const ownerNote = wsP.addRow(['The owner gets 70% of the profit on sales. Associates get 30%. Expenses, including anything still unpaid from an earlier month, come off after that. The net is not cash in the bank.']);
+  const ownerNote = wsP.addRow(['Commissions are the amounts Floor saved on these sales. Bonuses are the next line. The owner keeps the rest of the profit on sales. Expenses, including anything still unpaid from an earlier month, come off after that. The net is not cash in the bank.']);
   mergeLabelRow(wsP, ownerNote.number, 1, 5, String(ownerNote.getCell(1).value || ''));
   ownerNote.height = 28;
   wrapDataRows(wsP, hP, wsP.rowCount, 5);
@@ -530,20 +531,21 @@ function writeStartSheet(
     'Completed refunds': 'Refunds already paid. Taken out of the sales above.',
     'Net merchandise sales': 'Item prices left after those refunds.',
     'Customer-paid shipping': 'Added. The customer paid this on top of the item price.',
-    'Cost of goods sold': 'What those sold items cost.',
+    'Cost of goods sold': 'Item cost saved in Floor for each sale. Every item is on the Sales tab.',
     'Marketplace fees': 'Selling fees kept by the marketplaces.',
     'Card fees': 'Card fees taken out of the sale.',
     'Outbound shipping': 'Labels we paid to ship the orders.',
     'Sales left out, cost missing': 'These sales have no item cost, so they are pulled out. Nothing was estimated.',
     'Match the Sales tab': 'Makes this total match the Profit column on Sales.',
-    'Sales contribution': 'Profit on the sales. Associates get 30% of this. The owner gets 70%.',
-    'Commissions': '30% of the profit on sales. The owner\'s line is the other 70%.',
-    'Owner profit': '70% of the profit on sales. Larger than commissions. Expenses are not taken out of this.',
-    'Total expenses': 'Expenses this month, plus anything still unpaid from an earlier month. Not taken out of the 70%.',
-    'Net after expenses': 'Owner\'s 70% minus those expenses. Not cash in the bank.',
+    'Sales contribution': 'Profit on the sales. Same sale profit Floor uses, after the fees on each sale.',
+    'Commissions': 'Commission Floor saved on these sales.',
+    'Bonuses': find('Bonuses')?.note || 'Bonuses entered on Expenses. Not inside the commission line.',
+    'Owner profit': 'Profit on sales minus commissions and bonuses. Expenses are not taken out of this.',
+    'Total expenses': 'Expenses this month, plus anything still unpaid from an earlier month. Not taken out of owner profit.',
+    'Net after expenses': 'Owner profit minus those expenses. Not cash in the bank.',
   };
   for (const step of bridge) {
-    if (step.role === 'deduction' && !step.cents) continue;
+    if (step.role === 'deduction' && !step.cents && step.label !== 'Bonuses') continue;
     const signed = step.role === 'deduction' ? -step.cents : step.cents;
     const row = line(step.label, show(signed), brief[step.label] || step.note);
     if (step.role === 'subtotal' || step.role === 'profit' || step.role === 'net') row.font = { bold: true };
@@ -584,7 +586,7 @@ function writeStartSheet(
     section('Each period in this file');
     for (const group of groups) {
       const monthProfit = profitStatement(group.workbook).find((row) => row.role === 'profit');
-      line(group.label, show(monthProfit?.cents), 'The owner\'s 70% of the profit on sales for that slice. Expenses are under that line.');
+      line(group.label, show(monthProfit?.cents), 'Owner profit for that slice, after the commissions Floor saved. Expenses are under that line.');
     }
   } else {
     line('Previous period', 'Not available', 'This file has one period, so a comparison is not included.');
