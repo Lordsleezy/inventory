@@ -18,4 +18,5 @@ export function ebayLineRepair(plans: EbayLinePlan[], existing: Array<Record<str
   shipping: Array<{ sku?: string; from_cents: number; shipping_cents: number }>;
 };
 export function refundScope(order: unknown): { scope: string; skus: string[] };
+export function orderRefundAmountCents(order: unknown): number;
 export function trackingUploads(rows: Array<Record<string, unknown>>): Array<Record<string, unknown>>;
