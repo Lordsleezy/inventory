@@ -1,5 +1,18 @@
-// Inventory totals row (supabase inventory_totals(), 20261031200000). All numbers are UNITS (qty_on_hand), not rows.
-export type InventoryTotalsData = { total: number; listed: number; not_listed: number; not_listed_skus?: number; not_listed_pieces?: number; defective: number; dns?: number; not_ready?: number; never_list?: number };
+// Inventory totals (inventory_totals()). Total / ready / not-ready / DNS / defective are
+// physical pieces (qty_on_hand). Listed is eBay listing count (one per in-stock SKU live
+// on the selling account). listed_pieces is the qty behind those listings for balance math.
+export type InventoryTotalsData = {
+  total: number;
+  listed: number;
+  listed_pieces?: number;
+  not_listed: number;
+  not_listed_skus?: number;
+  not_listed_pieces?: number;
+  defective: number;
+  dns?: number;
+  not_ready?: number;
+  never_list?: number;
+};
 export type InventoryBucket = 'total' | 'listed' | 'not_listed' | 'not_ready' | 'dns' | 'defective';
 export const INVENTORY_BUCKET_LABELS: Record<InventoryBucket, string> = {
   total: 'Total inventory', listed: 'Listed', not_listed: 'Not listed', not_ready: 'Not ready to list',
@@ -9,7 +22,8 @@ export function inventoryBucketStatus(bucket: InventoryBucket): string {
   return bucket === 'dns' || bucket === 'defective' ? bucket : `inventory_${bucket}`;
 }
 
-/** Listed + Not listed + DNS + Defective must always equal Total. */
+/** Physical pieces behind every bucket must equal Total inventory. */
 export function totalsBalance(t: InventoryTotalsData): boolean {
-  return t.listed + t.not_listed + t.defective + (t.dns || 0) + (t.not_ready || 0) + (t.never_list || 0) === t.total;
+  const listedPieces = t.listed_pieces ?? t.listed;
+  return listedPieces + t.not_listed + t.defective + (t.dns || 0) + (t.not_ready || 0) + (t.never_list || 0) === t.total;
 }

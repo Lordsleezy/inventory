@@ -23,7 +23,10 @@ delete from public.photos where store_id=s and sku='95003';
 end $$;
 select set_config('request.jwt.claim.sub',current_setting('cards.owner'),true);
 select set_config('request.jwt.claim.role','authenticated',true);
-select is(public.inventory_totals() - 'not_listed_skus' - 'not_listed_pieces' - 'never_list','{"total":21,"listed":3,"not_listed":3,"not_ready":4,"dns":5,"defective":6}'::jsonb,'ready and not ready split physical quantities; website does not count as Listed');
+select is(public.inventory_totals() - 'not_listed_skus' - 'not_listed_pieces' - 'never_list' - 'listed_pieces',
+  '{"total":21,"listed":1,"not_listed":3,"not_ready":4,"dns":5,"defective":6}'::jsonb,
+  'listed is one eBay SKU; ready/not-ready stay physical quantities; website does not count as Listed');
+select is((public.inventory_totals()->>'listed_pieces')::int, 3, 'listed_pieces is the qty on that eBay SKU');
 select is((public.inventory_totals()->>'not_listed_pieces')::int, 3, 'not listed pieces match the card');
 select is((public.inventory_totals()->>'not_listed_skus')::int, 2, 'not listed counts SKUs separately from pieces');
 select is((public.inventory_totals()->>'never_list')::int, 0, 'never-list stock is not in these fixtures');
@@ -33,15 +36,27 @@ select is((select public.unit_inventory_bucket(u) from public.units u where sku=
 update public.unit_channel_selections set selected=true where sku='95002' and channel='ebay';
 select is((select public.unit_inventory_bucket(u) from public.units u where sku='95002'),'not_listed','checked but not live complete item is also Not listed');
 select is(public.portal_inventory_list('',status,false,'sku',0,100)->'totals'->>'piece_count',public.inventory_totals()->>bucket,'admin card matches its count: '||bucket)
-from (values('inventory_total','total'),('inventory_listed','listed'),('inventory_not_listed','not_listed'),('inventory_not_ready','not_ready'),('dns','dns'),('defective','defective')) c(status,bucket);
+from (values('inventory_total','total'),('inventory_not_listed','not_listed'),('inventory_not_ready','not_ready'),('dns','dns'),('defective','defective')) c(status,bucket);
+select is(public.portal_inventory_list('','inventory_listed',false,'sku',0,100)->'totals'->>'unit_count',
+  public.inventory_totals()->>'listed',
+  'Listed tab badge matches eBay SKU count');
+select is(public.portal_inventory_list('','inventory_listed',false,'sku',0,100)->'totals'->>'piece_count',
+  public.inventory_totals()->>'listed_pieces',
+  'Listed tab piece_count matches listed_pieces');
 select is(public.portal_inventory_list_with_locations('',status,false,'sku',0,100,'all')->'totals'->>'piece_count',public.inventory_totals()->>bucket,'location list matches its count: '||bucket)
-from (values('inventory_total','total'),('inventory_listed','listed'),('inventory_not_listed','not_listed'),('inventory_not_ready','not_ready'),('dns','dns'),('defective','defective')) c(status,bucket);
+from (values('inventory_total','total'),('inventory_not_listed','not_listed'),('inventory_not_ready','not_ready'),('dns','dns'),('defective','defective')) c(status,bucket);
+select is(public.portal_inventory_list_with_locations('','inventory_listed',false,'sku',0,100,'all')->'totals'->>'unit_count',
+  public.inventory_totals()->>'listed',
+  'location Listed list matches eBay SKU count');
 select is((public.portal_inventory_list('','inventory_not_ready',false,'sku',0,100)->'items'->0->>'sku'),'95003','not ready includes only unlisted incomplete item');
 select ok((public.portal_inventory_list('','inventory_not_ready',false,'sku',0,100)->'items'->0->'missing') ? 'photo','not ready explains missing photo');
 select is(public.portal_inventory_list('95004','inventory_total',false,'sku',0,100)->'totals'->>'piece_count','5','total breakdown includes DNS and search works');
 select set_config('request.jwt.claim.sub',current_setting('cards.clerk'),true);
 select is(public.staff_inventory_list('',status,false,'sku',0,100)->'totals'->>'piece_count',public.inventory_totals()->>bucket,'clerk card matches its count: '||bucket)
-from (values('inventory_total','total'),('inventory_listed','listed'),('inventory_not_listed','not_listed'),('inventory_not_ready','not_ready'),('dns','dns'),('defective','defective')) c(status,bucket);
+from (values('inventory_total','total'),('inventory_not_listed','not_listed'),('inventory_not_ready','not_ready'),('dns','dns'),('defective','defective')) c(status,bucket);
+select is(public.staff_inventory_list('','inventory_listed',false,'sku',0,100)->'totals'->>'unit_count',
+  public.inventory_totals()->>'listed',
+  'clerk Listed tab matches eBay SKU count');
 select ok(not exists(select 1 from jsonb_array_elements(public.staff_inventory_list('','inventory_total',false,'sku',0,100)->'items') i where i->>'sold_price_cents' is not null or i->>'acquisition_cost_cents' is not null),'clerk total breakdown reveals no sold prices or cost');
 select is(public.staff_inventory_list('','inventory_total',false,'sku',0,100)->'totals'->>'unit_count','6','total excludes sold and voided history');
 select * from finish();

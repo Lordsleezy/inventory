@@ -1,6 +1,6 @@
 -- pgTAP: inventory totals row and the reviewed-based "Needs to be checked" rule (20261031200000_inventory_totals_reviewed.sql).
 begin;
-select plan(14);
+select plan(15);
 do $$
 declare
   v_store uuid; v_owner uuid := gen_random_uuid(); v_clerk uuid := gen_random_uuid();
@@ -44,15 +44,17 @@ end $$;
 -- Totals are in units (a row of 12 counts 12), and clerks can read the counts.
 select set_config('request.jwt.claim.sub', current_setting('test.clerk_id'), true);
 select set_config('request.jwt.claim.role', 'authenticated', true);
-select is(public.inventory_totals() - 'not_listed_skus' - 'not_listed_pieces' - 'never_list', '{"total": 18, "listed": 12, "not_listed": 4, "not_ready": 0, "defective": 2, "dns": 0}'::jsonb,
-  'totals in units: eBay x12 only; website, Depop, delisted and Whatnot do not count as eBay listed');
-select is((public.inventory_totals() ->> 'listed')::int + (public.inventory_totals() ->> 'not_listed')::int + (public.inventory_totals() ->> 'defective')::int,
-  (public.inventory_totals() ->> 'total')::int, 'listed + not listed + defective = total');
+select is(public.inventory_totals() - 'not_listed_skus' - 'not_listed_pieces' - 'never_list' - 'listed_pieces',
+  '{"total": 18, "listed": 1, "not_listed": 4, "not_ready": 0, "defective": 2, "dns": 0}'::jsonb,
+  'listed is eBay SKUs (qty-12 stocked row counts once); website/Depop/Whatnot do not count');
+select is((public.inventory_totals() ->> 'listed_pieces')::int, 12, 'listed_pieces keeps the physical qty behind those eBay listings');
+select is((public.inventory_totals() ->> 'listed_pieces')::int + (public.inventory_totals() ->> 'not_listed')::int + (public.inventory_totals() ->> 'defective')::int,
+  (public.inventory_totals() ->> 'total')::int, 'listed pieces + not listed + defective = total');
 select set_config('request.jwt.claim.sub', current_setting('test.owner_id'), true);
 select is(public.inventory_totals() ->> 'total', '18', 'admin sees the same total');
 create temp view nc as select (i->>'sku') sku from jsonb_array_elements(public.portal_inventory_list('', 'needs_check') -> 'items') i;
 update public.units set state = 'sold' where sku = '98002';
-select is((select (t->>'listed')::int + (t->>'not_listed')::int + (t->>'defective')::int = (t->>'total')::int
+select is((select (t->>'listed_pieces')::int + (t->>'not_listed')::int + (t->>'defective')::int = (t->>'total')::int
   from (select public.inventory_totals() t) x), true, 'still balanced after a unit sells');
 update public.units set state = 'available' where sku = '98002';
 
