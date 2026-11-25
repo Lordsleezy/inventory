@@ -24,7 +24,7 @@ export function InventoryTotals({ client, variant, refreshKey = 0, selected, onS
     <div>
       <span>Total inventory</span>
       <strong>{n(totals?.total)}</strong>
-      {!plain && <small>{n(totals?.listed)} listed</small>}
+      {!plain && <small>{n(totals?.listed)} listed on eBay</small>}
     </div>
     {!totalOnly && <div>
       <span>Ready to list</span>
