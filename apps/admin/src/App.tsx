@@ -15,7 +15,7 @@ import { InsightsPage } from './InsightsPage';
 import { DropshipPage } from './dropship/DropshipPage';
 import { LogsPage } from './LogsPage';
 import { ClientErrorReporter } from './clientLog';
-import { displayPaymentNote, effectiveCommissionSplit, frozenCommissionBase, frozenCutsForTicket, inStoreOverrideRate, isBonusCategory, isOnline, NO_ONLINE, ownerPayoutSummary, paymentAllocation, payout, payoutCardIncludesSale, profit, reimbursementStillOwed, remainingProfit, reportProfitCents, withCommissionPaymentTag, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
+import { commissionStaysInOwed, displayPaymentNote, effectiveCommissionSplit, frozenCommissionBase, frozenCutsForTicket, inStoreOverrideRate, isBonusCategory, isOnline, NO_ONLINE, ownerPayoutSummary, paymentAllocation, payout, payoutCardIncludesSale, profit, refundCommissionUndo, reimbursementStillOwed, remainingProfit, reportProfitCents, withCommissionPaymentTag, type CommissionOverride, type OnlineCfg, type Rule } from './payouts';
 import { CommissionOverrideControls, CommissionOverrideMark } from './CommissionOverride';
 import { ExpensesPage, type Expense as StoreExpense } from './ExpensesPage';
 import { ConnectionsPage } from './ConnectionsPage';
@@ -1114,6 +1114,7 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
   const needsCost = allSales.filter(t => t.cost === null).length;
   const cards = active.map(person => {
     const rule = rules.find(r => r.employee_id === person.user_id);
+    const personAdjs = adjustments.filter(a => a.employee_id === person.user_id);
     const saleEntries: LedgerEntry[] = !rule ? [] : allSales.flatMap(t => {
       const online = isOnline(t,cfg);
       const ticket = { ...t, lines: t.lines.map(l => ({ sku: l.sku, price_cents: l.price_cents, cost_cents: l.cost_cents,
@@ -1121,6 +1122,7 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
         processing_fee_cents: l.processing_fee_cents, tax_owed_cents: l.tax_owed_cents })), commissionOverride: t.commissionOverride };
       const amount = cut(t.key, ticket, rule);
       if (!payoutCardIncludesSale(amount)) return [];
+      if (amount != null && amount > 0 && !commissionStaysInOwed(amount, refundCommissionUndo(personAdjs, t.key))) return [];
       // Default online: only the online recipient. Override: anyone with a non-zero cut.
       // A missing cost stays on the card as Needs cost and is not added to the balance.
       if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) {
@@ -1156,7 +1158,6 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
     });
     // Paid-sale returns: void drops the sale from live commission. Add back the original
     // sale commission so the negative clawback line is the visible net change.
-    const personAdjs = adjustments.filter(a => a.employee_id === person.user_id);
     const clawbackAddbacks: LedgerEntry[] = personAdjs
       .filter(a => a.amount_cents < 0 && a.return_id && (a.sale_commission_cents || 0) > 0)
       .map(a => ({

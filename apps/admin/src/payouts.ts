@@ -68,6 +68,26 @@ export function payoutCardIncludesSale(amount: number | null): boolean {
   return amount === null || Number.isFinite(amount);
 }
 
+/** Negative cents on refund lines that undo this sale's commission. */
+export function refundCommissionUndo(
+  adjustments: { amount_cents: number; reason?: string | null; ticket_key?: string | null }[],
+  ticketKey: string,
+): number {
+  return adjustments.reduce((sum, row) => {
+    if (row.amount_cents >= 0 || row.ticket_key !== ticketKey) return sum;
+    if (!String(row.reason || '').startsWith('Refund SKU')) return sum;
+    return sum + row.amount_cents;
+  }, 0);
+}
+
+/**
+ * A full refund already has a negative payout line. Counting the sale commission
+ * too puts that money back into the owed total.
+ */
+export function commissionStaysInOwed(amount: number, undoCents: number): boolean {
+  return undoCents >= 0 || amount + undoCents > 0;
+}
+
 /** In-store percent-of-profit rate for one SKU and person (store_payout_sku_rates). */
 export function inStoreOverrideRate(sku: string, employeeId: string, cfg: OnlineCfg): number | undefined {
   return cfg.skuRates?.[sku]?.[employeeId];

@@ -2,8 +2,10 @@ import { replacementAddback } from '../dispositions';
 import {
   isBonusCategory,
   isOnline,
+  commissionStaysInOwed,
   payout,
   payoutCardIncludesSale,
+  refundCommissionUndo,
   reimbursementStillOwed,
   type CommissionOverride,
   type OnlineCfg,
@@ -209,12 +211,14 @@ export function computePayoutPersonBalances(input: {
     let adjTotal = 0;
     let addbackTotal = 0;
 
+    const personAdjs = adjustments.filter((a) => a.employee_id === person.user_id);
     if (rule) {
       for (const t of allSales) {
         const online = isOnline(t, cfg);
         const ticket = { ...t, commissionOverride: t.commissionOverride ?? null };
         const amount = cutCommission(t.key, ticket, rule, frozen, cfg, frozenSet);
         if (!payoutCardIncludesSale(amount)) continue;
+        if (amount != null && amount > 0 && !commissionStaysInOwed(amount, refundCommissionUndo(personAdjs, t.key))) continue;
         if (online && !t.commissionOverride && person.user_id !== cfg.employeeId) {
           const jacobPct = t.frozenOnline ? t.frozenOnline.jacobPct : (cfg.jacobPct || 0);
           const jacobShare = person.user_id === cfg.slots?.jacob && jacobPct > 0;
@@ -230,7 +234,6 @@ export function computePayoutPersonBalances(input: {
       }
     }
 
-    const personAdjs = adjustments.filter((a) => a.employee_id === person.user_id);
     adjTotal = personAdjs.reduce((n, a) => n + a.amount_cents, 0);
     addbackTotal = personAdjs
       .filter((a) => {
