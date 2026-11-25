@@ -29,16 +29,18 @@ Full setup (redirect URL, Manage API scopes, env list): **[docs/TIKTOK_SHOP.md](
 
 ### eBay (ikonikdeals2026)
 
-Listings use the business policy **OBI Returns – 30 Day Buyer Pays**: returns accepted, 30 days, buyer pays return shipping. The desk follows the return reason. Nothing is refunded until an admin taps confirm.
+Listings use the business policy **OBI Returns – 30 Day Buyer Pays**: returns accepted, 30 days, buyer pays return shipping. The desk follows the return reason.
+
+**Refunds done on eBay auto-register on Returns.** Full refunds, line refunds, and amount-only partial refunds open (or update) a Returns desk row with the refund amount already stamped. The row stays **Open** so you can **Mark received** when the package comes back, then **Back in stock** or **Defective**. Unshipped cancels still close and restock automatically.
 
 Not as described, damaged, or the wrong item (eBay reason type SNAD): the refund is the item price plus the original shipping the buyer paid. The return label is on us. There is no deduction. See eBay's Money Back Guarantee and the Post-Order `RefundFeeTypeEnum` (`PURCHASE_PRICE` and `ORIGINAL_SHIPPING`).
 
 Change of mind: the buyer pays return shipping. The refund is the item price, and original shipping stays out of it, which eBay allows when the seller offered returns and the buyer paid shipping. If the item comes back used or damaged, a deduction up to 50% is allowed after a condition note and a photo uploaded to eBay first.
 
-1. Admin → Returns → **Check eBay**. That pulls Post-Order return requests into the same desk as Amazon and TikTok. Each row shows the reason.
-2. Open an eBay return. The refund button shows the full amount for that reason. **Refund** sends it only after the tap.
-3. A deduction is shown only on a change-of-mind return. Enter a percent (50 max), a condition note, and a photo, then **Submit deduction**.
-4. Confirming voids the sale and posts only the extra costs: our return label on a not-as-described return, unrecovered fees, and the deduction we kept (that amount reduces the loss). A refund is not posted again as an expense. Commission already paid becomes a negative adjustment. A second tap is refused.
+1. Admin → Returns → **Check eBay** (or wait for the 30-minute sync / 5-minute order poll). Post-Order cases and Seller Hub refunds land on the same desk.
+2. If the refund is not issued yet, open the return and tap **Confirm refund** (or **Submit deduction** on remorse). That sends the refund on eBay and stamps `refunded_at` without closing the row.
+3. When the item arrives, **Mark received**, then **Back in stock** or **Defective**.
+4. Money: owner profit drops by the refund; worker commissions stay on Confirm / amount-only partials. Full order reversals still void the sale. A second Confirm tap is refused.
 
 ### Dropship bot branch
 

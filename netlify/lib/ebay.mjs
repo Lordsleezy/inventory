@@ -30,7 +30,7 @@ import { listingMeasures, prepareUnitAspects, prepareUnitCondition } from "./eba
 import { floorLog, redact, setTrace } from "./floor-log.mjs";
 import { sendResend } from "./receipt.mjs";
 import { ebayFeeCents, ebayOrderAmounts, ebayOrderIsLocalPickup, ebayShipTo } from "./ebay-price.mjs";
-import { ebayLineRepair, planEbayOrderLines, refundScope } from "../../shared/ebay-order-lines.mjs";
+import { ebayLineRepair, orderRefundAmountCents, planEbayOrderLines, refundScope } from "../../shared/ebay-order-lines.mjs";
 import { fulfillmentPath, ordersWithShipment, trackingPatch } from "./ebay-shipment.mjs";
 import { compactTracking } from "./tracking-extract.mjs";
 
@@ -1756,6 +1756,18 @@ export async function reconcileCanceledEbayOrders(storeId, hint = {}, orders = n
           });
           if (error) console.log("ebay_line_refund", JSON.stringify({ orderId: order.orderId, sku, error: error.message }));
           else out.push({ orderId: order.orderId, sku, partial: true });
+        }
+      } else if (scope.scope === "amount") {
+        const refundCents = orderRefundAmountCents(order);
+        if (refundCents > 0) {
+          const { data, error } = await sb.rpc("floor_reconcile_ebay_amount_refund", {
+            p_store: storeId,
+            p_order: String(order.orderId),
+            p_refund_cents: refundCents,
+            p_evidence: order,
+          });
+          if (error) console.log("ebay_amount_refund", JSON.stringify({ orderId: order.orderId, error: error.message }));
+          else out.push({ orderId: order.orderId, amount: true, refundCents, ...data });
         }
       }
       continue;
