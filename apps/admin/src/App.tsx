@@ -1209,7 +1209,6 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
     return {person,balance,commission,bonus,reimburse,paidTotal,adjTotal,addbackTotal,entries};
   });
   const totalCommission = cards.reduce((n,c)=>n+c.commission,0);
-  const totalAdj = cards.reduce((n,c)=>n+(c.adjTotal || 0),0);
   // Each payment covers reimbursements outstanding that day, then commission — unless tagged [commission].
   const owedSplits = cards.map(c => {
     const personPays = payments.filter(p => p.employee_id === c.person.user_id);
@@ -1282,7 +1281,7 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
     : `Paid so far: ${money(paidSplit.commissionPaid)} commission`;
   if (native) return <NativePayouts money={money} loading={loading} owedLabel={money(commissionBalanceOwed + reimburseBalanceOwed)} paidLine={paidLine} cards={owedSplits} rules={rules} cfg={cfg} personName={personName} frozen={frozen} busy={busy} recordPayment={recordPayment} onCommissionChanged={onCommissionChanged} client={sb} onReload={onReload || (() => {})} />;
   return <>
-    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Store profit is sale price + buyer-paid shipping − every fee − shipping label − cost. Commissions are paid on commission profit: {cfg.absorbFees ? 'the store absorbs channel and card fees, so only the shipping label and cost come off' : 'channel fees, card fees, label and cost all come off'}. Mercari out-of-pocket labels count on the sale like other shipping costs; reimbursement is separate on Expenses. Commissions are frozen per sale. Each payment covers reimbursements outstanding that day, then commission — check “Apply to commission” to skip reimbursements. Later reimbursements stay unpaid. Return adjustments stay separate; payment history is never rewritten.</p></div></header>
+    <header><div><div className="eyebrow">TEAM EARNINGS</div><h1>Payouts</h1><p>Store profit is sale price + buyer-paid shipping − every fee − shipping label − cost. Commissions are paid on commission profit: {cfg.absorbFees ? 'the store absorbs channel and card fees, so only the shipping label and cost come off' : 'channel fees, card fees, label and cost all come off'}. Mercari out-of-pocket labels count on the sale like other shipping costs; reimbursement is separate on Expenses. Commissions are frozen per sale. Each payment covers reimbursements outstanding that day, then commission — check “Apply to commission” to skip reimbursements. Later reimbursements stay unpaid. Refunded commission is already taken out of the balance owed. Payment history is never rewritten.</p></div></header>
     <div className="stats payout-stats">
       <Stat name="Owner share" value={ownerShare === null ? 'Pending cost' : money(ownerShare)} />
       <Stat name="Profit after costs" hint={hasEbaySale && ebayFees > 0 ? `includes ${money(ebayFees)} eBay insertion/subscription` : undefined} value={profitAfterCosts === null ? 'Pending cost' : money(profitAfterCosts)} />
@@ -1290,7 +1289,6 @@ function PayoutsPage({allSales,ebayFees,staff,rules,payments,adjustments,expense
       <Stat name="Commission paid" value={money(paidSplit.commissionPaid)} />
       <Stat name="Reimbursements repaid" value={money(paidSplit.reimbursePaid)} />
       <Stat name="Reimbursements owed" value={money(reimburseBalanceOwed)} />
-      <Stat name="Return adjustments" value={money(totalAdj)} />
       <Stat name="Commissions balance owed" value={money(commissionBalanceOwed)} />
       {needsCost > 0 && <Stat name="Sales needing cost" value={String(needsCost)} />}
     </div>
