@@ -1,13 +1,32 @@
--- Shipped eBay refunds open a Returns desk row; unshipped still closes + restocks.
--- Amount-only PARTIALLY_REFUNDED opens a partial desk row without voiding the sale.
+-- Shipped eBay refunds open a Returns desk row and take Paul/Jacob % out of commissions.
+-- Unshipped still closes + restocks. Amount-only PARTIALLY_REFUNDED opens a partial desk row.
 begin;
-select plan(12);
+select plan(16);
 set constraints all immediate;
 
 do $$
-declare s uuid;
+declare
+  s uuid;
+  v_paul uuid := gen_random_uuid();
+  v_jacob uuid := gen_random_uuid();
 begin
+  insert into auth.users (id) values (v_paul), (v_jacob);
   insert into public.stores default values returning id into s;
+  insert into public.staff (user_id, store_id, display_name, role) values
+    (v_paul, s, 'Paul', 'owner'), (v_jacob, s, 'Jacob', 'staff');
+  perform public.seed_store_settings(s, 'Open returns store');
+  perform public.pgtap_sync_owner_portal_admins(s);
+  insert into public.store_settings (store_id, key, value) values
+    (s, 'commission_store_absorbs_fees', to_jsonb(true)),
+    (s, 'online_channels', '["website","ebay","mercari"]'),
+    (s, 'online_payout_pct', '25'),
+    (s, 'online_jacob_pct', '5'),
+    (s, 'online_payout_employee_id', to_jsonb(v_paul::text))
+  on conflict (store_id, key) do update set value = excluded.value;
+  insert into public.store_payout_people (store_id, slot, employee_id) values
+    (s, 'paul', v_paul), (s, 'jacob', v_jacob);
+  insert into public.portal_payout_rules (store_id, employee_id, method, rate) values
+    (s, v_paul, 'percent_profit', 20), (s, v_jacob, 'percent_profit', 10);
   insert into public.sku_ledger (sku, issued_at, store_id) values
     ('98301', now(), s), ('98302', now(), s), ('98303', now(), s);
   insert into public.units (sku, store_id, title, state, qty_on_hand, ask_cents, acquisition_cost_cents, received_at, updated_at)
@@ -28,7 +47,11 @@ begin
     case sku when '98301' then 'SHIP-R1' when '98302' then 'OPEN-R2' else 'PART-R3' end,
     'paid', 'ship', price_cents, 0, 0, price_cents
   from public.sales where store_id = s;
+  -- Freeze commissions so a keep-refund can refreeze Paul 25% / Jacob 5%.
+  perform public.payout_snapshot_sale(id) from public.sales where store_id = s;
   perform set_config('open_ret.store', s::text, true);
+  perform set_config('open_ret.paul', v_paul::text, true);
+  perform set_config('open_ret.jacob', v_jacob::text, true);
 end $$;
 
 select set_config('request.jwt.claim.role', 'service_role', true);
@@ -55,6 +78,29 @@ select is(
   (select state from public.units where sku = '98301'),
   'sold',
   'shipped unit waits for Mark received'
+);
+select ok(
+  (select voided_at is null from public.sales where sku = '98301'),
+  'shipped full refund leaves the sale open'
+);
+select is(
+  (select buyer_keep_refund_cents from public.sales where sku = '98301'),
+  5000,
+  'shipped full refund stores the keep-refund'
+);
+select is(
+  (select c.amount_cents from public.sale_commissions c
+   join public.sales s on s.id = c.sale_id
+   where s.sku = '98301' and c.employee_id = current_setting('open_ret.paul')::uuid),
+  0,
+  'Paul loses his 25% after a full shipped refund'
+);
+select is(
+  (select c.amount_cents from public.sale_commissions c
+   join public.sales s on s.id = c.sale_id
+   where s.sku = '98301' and c.employee_id = current_setting('open_ret.jacob')::uuid),
+  0,
+  'Jacob loses his 5% after a full shipped refund'
 );
 
 select lives_ok(

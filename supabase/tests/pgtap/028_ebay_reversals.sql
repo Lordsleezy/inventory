@@ -39,7 +39,8 @@ select lives_ok($q$select public.floor_reconcile_ebay_reversal(current_setting('
 select is((select count(*)::int from public.ebay_reversal_audit where order_id='CANCEL-1'),1,'retry changes nothing and creates no duplicate adjustment');
 select lives_ok($q$select public.floor_reconcile_ebay_reversal(current_setting('ebay_test.store')::uuid,'REFUND-2','{"orderId":"REFUND-2","orderPaymentStatus":"FULLY_REFUNDED","orderFulfillmentStatus":"FULFILLED"}')$q$,'shipped full refund reverses money');
 select is((select state from public.units where sku='94002'),'sold','shipped refund requires physical stock review');
-select ok((select voided_at is not null from public.sales where sku='94002'),'shipped refund is excluded from sales');
+select ok((select voided_at is null from public.sales where sku='94002'),'shipped refund leaves the sale open');
+select is((select buyer_keep_refund_cents from public.sales where sku='94002'),5000,'shipped refund cuts owner profit and commissions');
 select ok((select voided_at is null from public.sales where sku='94003'),'in-store sale untouched');
 select ok((select voided_at is null from public.sales where sku='94004'),'paid eBay sale untouched');
 -- An old canceled transaction cannot restock a unit that had a later sale/refund.

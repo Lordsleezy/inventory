@@ -40,7 +40,7 @@ Change of mind: the buyer pays return shipping. The refund is the item price, an
 1. Admin → Returns → **Check eBay** (or wait for the 30-minute sync / 5-minute order poll). Post-Order cases and Seller Hub refunds land on the same desk.
 2. If the refund is not issued yet, open the return and tap **Confirm refund** (or **Submit deduction** on remorse). That sends the refund on eBay and stamps `refunded_at` without closing the row.
 3. When the item arrives, **Mark received**, then **Back in stock** or **Defective**.
-4. Money: owner profit drops by the refund; worker commissions stay on Confirm / amount-only partials. Full order reversals still void the sale. A second Confirm tap is refused.
+4. Money: every refund (full, partial, Confirm, or eBay sync) stays on the sale. Paul and Jacob lose their payout % of the refund; Steve absorbs the rest. Unshipped cancels still void and restock. A second Confirm tap is refused.
 
 ### Dropship bot branch
 
@@ -70,7 +70,7 @@ Change of mind: the buyer pays return shipping. The refund is the item price, an
 ## Architecture notes
 
 - Same SKU reopens on restock; never mint a new SKU for a returned unit.
-- Refunded sales call `return_reverse_sale` → `sales.voided_at` so payouts/commission drop that sale (same as other voids). Buyer-keeps / write-off sets unit `lost`/`scrapped` without relist.
+- Refunds that keep the sale open set `buyer_keep_refund_cents` and refreeze commissions (Paul/Jacob % of the refund). Pre-ship cancels still `voided_at` + clawbacks. Buyer-keeps / write-off sets unit `lost`/`scrapped` without relist.
 - Return costs post to `portal_expenses` category **Returns** (refund + seller-paid label + unrecovered fees + re-grade loss).
 - Relist disposition restores `available` and uses existing `sale_relist` / listing sync / double-sale protection.
 - Return reserve only affects **new** Amazon list-price suggestions; stored `ask_cents` and live listings are untouched.

@@ -1,7 +1,8 @@
 -- eBay refunds (full, line, or amount-only partial) open a Returns desk row.
--- Shipped items stay Open so staff can Mark received later. Unshipped cancels
--- still close and restock. Full refunds still void the sale; amount-only
--- partials cut owner profit without voiding.
+-- Shipped items stay Open so staff can Mark received later. Money stays on the
+-- sale: buyer_keep_refund_cents + payout refreeze so Paul/Jacob lose their
+-- percent of the refund and Steve the rest. Unshipped cancels still void,
+-- close, and restock.
 
 begin;
 
@@ -32,7 +33,12 @@ begin
       and z.sold_at > (select max(sold_at) from public.sales where id = any (v_sales)))
     and not exists (select 1 from public.unit_dispositions d where d.store_id = p_store and d.sku = x.sku and d.undone_at is null)
     and not exists (select 1 from public.listing_queue q where q.store_id = p_store and q.sku = x.sku and q.status = 'working');
-  if not exists (select 1 from public.sales where id = any (v_sales) and voided_at is null)
+  -- Unshipped: work until every sale is voided. Shipped: work until keep-refund covers price.
+  if not exists (
+       select 1 from public.sales s
+       where s.id = any (v_sales) and s.voided_at is null
+         and (v_restock or coalesce(s.buyer_keep_refund_cents, 0) < greatest(s.price_cents, 0))
+     )
     and not exists (select 1 from public.web_orders where store_id = p_store and channel = 'ebay' and order_no = p_order and status not in ('canceled', 'refunded'))
     and coalesce(cardinality(v_restore_skus), 0) = 0 then
     return jsonb_build_object('ok', true, 'skipped', true, 'stock_review_required', not v_restock);
@@ -91,15 +97,28 @@ begin
         ) returning id into v_return;
       end if;
       perform set_config('floor.bundle_restock', case when v_restock then 'true' else 'false' end, true);
-      update public.sales set voided_at = now(), void_reason = v_reason where id = v_sale.id;
-      perform public.return_apply_commission_clawbacks(v_return);
+      if v_restock then
+        -- Pre-ship cancel: void and claw back frozen commissions.
+        update public.sales set voided_at = now(), void_reason = v_reason where id = v_sale.id;
+        perform public.return_apply_commission_clawbacks(v_return);
+      else
+        -- Shipped refund: sale stays; Paul/Jacob/Steve split absorbs the refund.
+        perform public.return_apply_owner_profit_refund(v_return);
+      end if;
     end if;
     update public.delist_tasks set completed_at = now() where store_id = p_store and sale_id = v_sale.id and completed_at is null;
   end loop;
 
-  update public.web_orders set status = 'canceled', canceled_at = coalesce(canceled_at, now()),
-    cancel_source = 'ebay_api', cancel_reason = v_reason, updated_at = now()
-  where store_id = p_store and channel = 'ebay' and order_no = p_order and status not in ('canceled', 'refunded');
+  if v_restock then
+    update public.web_orders set status = 'canceled', canceled_at = coalesce(canceled_at, now()),
+      cancel_source = 'ebay_api', cancel_reason = v_reason, updated_at = now()
+    where store_id = p_store and channel = 'ebay' and order_no = p_order and status not in ('canceled', 'refunded');
+  else
+    update public.web_orders set status = 'refunded',
+      cancel_source = coalesce(cancel_source, 'ebay_api'), cancel_reason = coalesce(cancel_reason, v_reason),
+      updated_at = now()
+    where store_id = p_store and channel = 'ebay' and order_no = p_order and status = 'paid';
+  end if;
 
   for u in select * from public.units where store_id = p_store and sku = any (v_restore_skus) for update loop
     if v_restock and u.state = 'sold'
@@ -214,15 +233,29 @@ begin
       ) returning id into v_return;
     end if;
     perform set_config('floor.bundle_restock', case when v_restock then 'true' else 'false' end, true);
-    update public.sales set voided_at = now(), void_reason = v_reason where id = v_sale.id;
-    perform public.return_apply_commission_clawbacks(v_return);
+    if v_restock then
+      update public.sales set voided_at = now(), void_reason = v_reason where id = v_sale.id;
+      perform public.return_apply_commission_clawbacks(v_return);
+    else
+      perform public.return_apply_owner_profit_refund(v_return);
+    end if;
   end loop;
 
-  update public.web_orders
-  set status = 'canceled', canceled_at = coalesce(canceled_at, now()),
-      cancel_source = 'ebay_api', cancel_reason = v_reason, updated_at = now()
-  where store_id = p_store and channel = 'ebay' and order_no = p_order and sku = p_sku
-    and status not in ('canceled', 'refunded');
+  if v_restock then
+    update public.web_orders
+    set status = 'canceled', canceled_at = coalesce(canceled_at, now()),
+        cancel_source = 'ebay_api', cancel_reason = v_reason, updated_at = now()
+    where store_id = p_store and channel = 'ebay' and order_no = p_order and sku = p_sku
+      and status not in ('canceled', 'refunded');
+  else
+    update public.web_orders
+    set status = 'refunded',
+        cancel_source = coalesce(cancel_source, 'ebay_api'),
+        cancel_reason = coalesce(cancel_reason, v_reason),
+        updated_at = now()
+    where store_id = p_store and channel = 'ebay' and order_no = p_order and sku = p_sku
+      and status = 'paid';
+  end if;
 
   if v_restock then
     update public.units u

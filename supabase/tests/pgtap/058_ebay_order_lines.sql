@@ -1,6 +1,6 @@
 -- A partial refund on one line of a multi-item eBay order leaves the other line sold.
 begin;
-select plan(5);
+select plan(6);
 set constraints all immediate;
 
 do $$
@@ -49,8 +49,13 @@ select lives_ok(
 );
 
 select ok(
-  (select voided_at is not null from public.sales where sku = '98201'),
-  'the refunded line is voided'
+  (select voided_at is null from public.sales where sku = '98201'),
+  'the refunded shipped line stays on the sale'
+);
+select is(
+  (select buyer_keep_refund_cents from public.sales where sku = '98201'),
+  1000,
+  'the refunded line takes the refund out of commissions'
 );
 select ok(
   (select voided_at is null from public.sales where sku = '98202'),
