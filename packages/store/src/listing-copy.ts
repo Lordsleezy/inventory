@@ -104,6 +104,18 @@ export function regenerateListingBody(input: {
   return [first, rest.join(" ")].filter((p) => p.trim()).join(" ");
 }
 
+/** Phrases that steer buyers off eBay (Seller Hub "outside eBay" policy). */
+export function stripOffPlatformContact(text: string): string {
+  return String(text || "")
+    .replace(
+      /\n*Message us on Depop if you need more detail before buying\.\s*If the item is not as described, reach out and we will make it right\.\s*/gi,
+      "\n",
+    )
+    .replace(/\n*Message us on (Depop|Mercari|Facebook|Whatnot|Poshmark|Amazon)\b[^\n]*/gi, "\n")
+    .replace(/\n+/g, "\n")
+    .trim();
+}
+
 /** Product copy first; Floor condition/test/defects always last, never softened. */
 export function composeChannelDescription(input: {
   listingBody?: string | null;
@@ -116,7 +128,7 @@ export function composeChannelDescription(input: {
   defectNotes?: string | null;
   sku?: string;
 }): string {
-  const body = (input.listingBody || "").trim();
+  const body = stripOffPlatformContact((input.listingBody || "").trim());
   const parts: string[] = [];
   if (body) parts.push(body);
   else {

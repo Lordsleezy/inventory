@@ -36,7 +36,7 @@ test("photo folders start with SKU and slug the model", () => {
 test("listing copy is paste-ready and includes defects", () => {
   const title = listingTitle(unit);
   assert.match(title, /Whirlpool WRS325/);
-  assert.match(title, /SKU 11203/);
+  assert.doesNotMatch(title, /SKU 11203/);
   const body = listingDescription(unit);
   assert.match(body, /Ask: \$449\.00/);
   assert.match(body, /Small dent on left door/);

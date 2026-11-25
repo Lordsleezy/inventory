@@ -33,9 +33,15 @@ export function ebayIdentifiers(unit = {}, aspects = {}) {
 
 export function ebayDescription(description, sku) {
   const body = stripClearanceFooter(String(description || ""))
+    .replace(
+      /\n*Message us on Depop if you need more detail before buying\.\s*If the item is not as described, reach out and we will make it right\.\s*/gi,
+      "\n",
+    )
+    .replace(/\n*Message us on (Depop|Mercari|Facebook|Whatnot|Poshmark|Amazon)\b[^\n]*/gi, "\n")
     .replace(/\n\s*This unit \(Floor\):[\s\S]*$/i, "")
     .replace(/\n\s*Sold as-is\. Local pickup unless arranged\.\s*$/i, "")
     .replace(/\n\s*(?:SKU\s*)?\d{5}\s*$/i, "")
+    .replace(/\n+/g, "\n")
     .trim();
   return descriptionWithReturns(`${body}\n\n${sku}`.trim());
 }

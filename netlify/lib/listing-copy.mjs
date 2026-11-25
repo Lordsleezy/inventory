@@ -26,8 +26,20 @@ function capacityLine(specs) {
   return split ? `${specs.capacity_cu_ft} cu ft (${split})` : `${specs.capacity_cu_ft} cu ft`;
 }
 
+/** Phrases that steer buyers off eBay (Seller Hub "outside eBay" policy). */
+export function stripOffPlatformContact(text) {
+  return String(text || "")
+    .replace(
+      /\n*Message us on Depop if you need more detail before buying\.\s*If the item is not as described, reach out and we will make it right\.\s*/gi,
+      "\n",
+    )
+    .replace(/\n*Message us on (Depop|Mercari|Facebook|Whatnot|Poshmark|Amazon)\b[^\n]*/gi, "\n")
+    .replace(/\n+/g, "\n")
+    .trim();
+}
+
 export function composeChannelDescription(input) {
-  const body = String(input.listingBody || "").trim();
+  const body = stripOffPlatformContact(String(input.listingBody || "").trim());
   const parts = [];
   if (body) parts.push(body);
   else {
