@@ -3,6 +3,9 @@ import {
   selectEligibleFromAuditRows,
   selectCollectiblesToRevert,
   isCollectible,
+  pickFreeShippingPolicy,
+  policyMode,
+  FREE_POLICY_NAME,
   SHIP_CUTOFF_CENTS,
   PRICE_BUMP_CENTS,
 } from "./ebay-free-ship-bump.mjs";
@@ -71,5 +74,43 @@ const revert = selectCollectiblesToRevert([
 assert.equal(revert.length, 1);
 assert.equal(revert[0].sku, "11216");
 assert.equal(revert[0].restore_cents, 4499);
+
+const fakeCalculatedNamedFree = {
+  name: FREE_POLICY_NAME,
+  fulfillmentPolicyId: "bad",
+  shippingOptions: [{
+    costType: "CALCULATED",
+    shippingServices: [{ freeShipping: false, shippingServiceCode: "USPSParcel" }],
+  }],
+};
+const fakePriorityFree = {
+  name: "OBI Free Shipping Copy",
+  fulfillmentPolicyId: "good-priority",
+  shippingOptions: [{
+    costType: "FLAT_RATE",
+    shippingServices: [{
+      freeShipping: true,
+      shippingServiceCode: "USPSPriority",
+      shippingCost: { value: "0.0", currency: "USD" },
+    }],
+  }],
+};
+const fakeGroundFree = {
+  name: "OBI Free Ground Advantage",
+  fulfillmentPolicyId: "good-ground",
+  shippingOptions: [{
+    costType: "FLAT_RATE",
+    shippingServices: [{
+      freeShipping: true,
+      shippingServiceCode: "USPSParcel",
+      shippingCost: { value: "0.0", currency: "USD" },
+    }],
+  }],
+};
+assert.equal(policyMode(fakeCalculatedNamedFree), "calculated");
+assert.equal(policyMode(fakePriorityFree), "free");
+const picked = pickFreeShippingPolicy([fakeCalculatedNamedFree, fakeGroundFree, fakePriorityFree]);
+assert.equal(picked.fulfillmentPolicyId, "good-priority");
+assert.equal(pickFreeShippingPolicy([fakeCalculatedNamedFree]), null);
 
 console.log("ebay-free-ship-bump.test.mjs ok");
