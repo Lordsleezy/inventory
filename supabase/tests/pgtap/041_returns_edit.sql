@@ -78,10 +78,13 @@ select lives_ok(
   $body$$q$,
   'edit refund after commission paid still works');
 
-select ok((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+select ok((select a.amount_cents from public.portal_payout_adjustments a
+    join public.sales s on s.id = a.sale_id
+    where s.sku = '11501' and a.employee_id = current_setting('test.paul')::uuid) < 0
+  and (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
     where s.sku = '11501' and c.employee_id = current_setting('test.paul')::uuid)
-  < current_setting('test.comm700')::int,
-  'raising the refund takes more out of Paul commission');
+  = current_setting('test.comm700')::int,
+  'raising the refund undoes commission on a new line and leaves what was earned');
 select is((select buyer_keep_refund_cents from public.sales where sku = '11501'), 900, 'owner profit keep-refund follows the higher refund');
 
 select lives_ok(

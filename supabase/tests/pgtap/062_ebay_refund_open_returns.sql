@@ -1,4 +1,4 @@
--- Shipped eBay refunds open a Returns desk row and take Paul/Jacob % out of commissions.
+-- Shipped eBay refunds open a Returns desk row. The sale stays, and a new line undoes the commission.
 -- Unshipped still closes + restocks. Amount-only PARTIALLY_REFUNDED opens a partial desk row.
 begin;
 select plan(16);
@@ -89,18 +89,24 @@ select is(
   'shipped full refund stores the keep-refund'
 );
 select is(
-  (select c.amount_cents from public.sale_commissions c
+  (select a.amount_cents from public.portal_payout_adjustments a
+   join public.sales s on s.id = a.sale_id
+   where s.sku = '98301' and a.employee_id = current_setting('open_ret.paul')::uuid
+     and coalesce(a.sale_commission_cents, 0) = 0),
+  -(select c.amount_cents from public.sale_commissions c
    join public.sales s on s.id = c.sale_id
    where s.sku = '98301' and c.employee_id = current_setting('open_ret.paul')::uuid),
-  0,
-  'Paul loses his 25% after a full shipped refund'
+  'Paul keeps the commission he earned and a refund line undoes it'
 );
 select is(
-  (select c.amount_cents from public.sale_commissions c
+  (select a.amount_cents from public.portal_payout_adjustments a
+   join public.sales s on s.id = a.sale_id
+   where s.sku = '98301' and a.employee_id = current_setting('open_ret.jacob')::uuid
+     and coalesce(a.sale_commission_cents, 0) = 0),
+  -(select c.amount_cents from public.sale_commissions c
    join public.sales s on s.id = c.sale_id
    where s.sku = '98301' and c.employee_id = current_setting('open_ret.jacob')::uuid),
-  0,
-  'Jacob loses his 5% after a full shipped refund'
+  'Jacob keeps the commission he earned and a refund line undoes it'
 );
 
 select lives_ok(

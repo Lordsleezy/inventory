@@ -66,14 +66,15 @@ select is((select amount_cents from public.portal_expenses where external_id = '
   250, 'a label I paid is a Returns expense');
 select is((select count(*) from public.portal_expenses where source = 'return' and amount_cents = 400 and voided_at is null),
   0::bigint, 'the refund itself is not a second expense');
-select is((select count(*)::int from public.portal_payout_adjustments a
-    join public.sales s on s.id = a.sale_id where s.sku = '11482'),
-  0, 'keep-refund lowers the frozen commission instead of posting an adjustment');
-select ok((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
-    where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid)
-  < (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+select ok((select a.amount_cents from public.portal_payout_adjustments a
+    join public.sales s on s.id = a.sale_id
+    where s.sku = '11482' and a.employee_id = current_setting('test.paul')::uuid) < 0,
+  'a partial refund undoes that share of commission on a new line');
+select is((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+    where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid),
+  (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
     where s.sku = '11483' and c.employee_id = current_setting('test.paul')::uuid),
-  'a partial refund reduces Paul commission below the matching sale');
+  'the sale keeps the commission that was earned');
 
 select lives_ok(
   $q$do $body$
@@ -98,11 +99,17 @@ select lives_ok(
   $body$$q$,
   'a full refund hits owner profit and the commission split');
 
-select ok((select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+select ok((select a.amount_cents from public.portal_payout_adjustments a
+    join public.sales s on s.id = a.sale_id
+    where s.sku = '11483' and a.employee_id = current_setting('test.paul')::uuid)
+  < (select a.amount_cents from public.portal_payout_adjustments a
+    join public.sales s on s.id = a.sale_id
+    where s.sku = '11482' and a.employee_id = current_setting('test.paul')::uuid)
+  and (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
     where s.sku = '11483' and c.employee_id = current_setting('test.paul')::uuid)
-  < (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
+  = (select c.amount_cents from public.sale_commissions c join public.sales s on s.id = c.sale_id
     where s.sku = '11482' and c.employee_id = current_setting('test.paul')::uuid),
-  'a full refund takes more of Paul commission than the partial');
+  'a full refund undoes the commission on a new line and leaves what was earned');
 select is((select buyer_keep_refund_cents from public.sales where sku = '11483'), 1999, 'owner profit keep-refund takes the full refund');
 select is((select voided_at is null from public.sales where sku = '11483'), true, 'a refund leaves the sale unvoided');
 
