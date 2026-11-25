@@ -148,7 +148,7 @@ export function selectEligibleFromAuditRows(rows, { cutoffCents = SHIP_CUTOFF_CE
   return { eligible, skipped };
 }
 
-function policyMode(policy) {
+export function policyMode(policy) {
   const options = policy?.shippingOptions || [];
   const services = options.flatMap((opt) => opt?.shippingServices || []);
   const calculated = options.some((opt) => String(opt.costType || "").toUpperCase() === "CALCULATED");
@@ -164,27 +164,24 @@ function policyId(row, kind) {
   return row?.[`${kind}PolicyId`] || row?.policyId || row?.id || null;
 }
 
-export async function ensureFreeShippingPolicy(account) {
-  const market = marketplaceIdFromEnv();
-  const json = await ebayFetchAccount(
-    account,
-    "GET",
-    `/sell/account/v1/fulfillment_policy?marketplace_id=${market}`,
+function policyServices(policy) {
+  return (policy?.shippingOptions || []).flatMap((opt) => opt?.shippingServices || []);
+}
+
+/** Prefer a real free flat policy (Priority when present). Never trust name alone — "OBI Free Shipping" was once calculated buyer-pays. */
+export function pickFreeShippingPolicy(rows = []) {
+  const freeRows = (rows || []).filter((r) => policyMode(r) === "free");
+  if (!freeRows.length) return null;
+  const named = freeRows.find((r) => String(r?.name || "").trim() === FREE_POLICY_NAME);
+  const priority = freeRows.find((r) =>
+    policyServices(r).some((svc) => /USPSPriority/i.test(String(svc?.shippingServiceCode || ""))),
   );
-  const rows = json?.fulfillmentPolicies || [];
-  const named = rows.find((r) => String(r?.name || "").trim() === FREE_POLICY_NAME);
-  const free = named || rows.find((r) => policyMode(r) === "free");
-  if (free) {
-    return {
-      fulfillmentPolicyId: String(policyId(free, "fulfillment")),
-      paymentPolicyId: account.payment_policy_id || null,
-      returnPolicyId: account.return_policy_id || null,
-      reused: true,
-      name: free.name || FREE_POLICY_NAME,
-    };
-  }
-  const body = {
-    name: FREE_POLICY_NAME,
+  return named || priority || freeRows[0];
+}
+
+export function freeShippingPolicyBody(market, { name = FREE_POLICY_NAME } = {}) {
+  return {
+    name,
     marketplaceId: market,
     categoryTypes: [{ name: "ALL_EXCLUDING_MOTORS_VEHICLES", default: true }],
     handlingTime: { value: 2, unit: "DAY" },
@@ -207,13 +204,41 @@ export async function ensureFreeShippingPolicy(account) {
       },
     ],
   };
-  const created = await ebayFetchAccount(account, "POST", "/sell/account/v1/fulfillment_policy", body);
+}
+
+export async function ensureFreeShippingPolicy(account) {
+  const market = marketplaceIdFromEnv();
+  const json = await ebayFetchAccount(
+    account,
+    "GET",
+    `/sell/account/v1/fulfillment_policy?marketplace_id=${market}`,
+  );
+  const rows = json?.fulfillmentPolicies || [];
+  const free = pickFreeShippingPolicy(rows);
+  if (free) {
+    return {
+      fulfillmentPolicyId: String(policyId(free, "fulfillment")),
+      paymentPolicyId: account.payment_policy_id || null,
+      returnPolicyId: account.return_policy_id || null,
+      reused: true,
+      name: free.name || FREE_POLICY_NAME,
+    };
+  }
+  // Named shell may exist as calculated buyer-pays — create under a distinct name.
+  const namedTaken = rows.some((r) => String(r?.name || "").trim() === FREE_POLICY_NAME);
+  const createName = namedTaken ? `${FREE_POLICY_NAME} Flat` : FREE_POLICY_NAME;
+  const created = await ebayFetchAccount(
+    account,
+    "POST",
+    "/sell/account/v1/fulfillment_policy",
+    freeShippingPolicyBody(market, { name: createName }),
+  );
   return {
     fulfillmentPolicyId: String(created.fulfillmentPolicyId || created.id),
     paymentPolicyId: account.payment_policy_id || null,
     returnPolicyId: account.return_policy_id || null,
     reused: false,
-    name: FREE_POLICY_NAME,
+    name: createName,
   };
 }
 
