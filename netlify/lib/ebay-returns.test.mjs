@@ -72,6 +72,27 @@ test("seller-paid return and replacement label costs are read from detail", () =
   );
 });
 
+test("a refunded eBay return stays Open for Mark received", () => {
+  const row = mapEbayReturn({
+    returnId: "99",
+    orderId: "3-4",
+    creationInfo: { reason: "ORDERED_ACCIDENTALLY", reasonType: "REMORSE", item: { sku: "99802" } },
+    itemPrice: { value: 20 },
+    state: "RETURN_CLOSED",
+  });
+  assert.equal(row.status, "requested");
+  assert.equal(row.already_refunded, true);
+  assert.equal(row.needs_decision, false);
+  const inTransit = mapEbayReturn({
+    returnId: "100",
+    creationInfo: { reason: "DEFECTIVE_ITEM", reasonType: "SNAD", item: { sku: "99803" } },
+    itemPrice: { value: 40 },
+    state: "ITEM_SHIPPED",
+  });
+  assert.equal(inTransit.status, "in_transit");
+  assert.equal(inTransit.already_refunded, false);
+});
+
 test("actual refund totals prefer eBay posted amounts", () => {
   assert.equal(
     ebayActualRefundCents({

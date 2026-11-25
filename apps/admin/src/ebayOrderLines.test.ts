@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { groupOpenOrders } from '../../../shared/bundle-shipping.mjs';
 import {
   ebayLineRepair,
+  orderRefundAmountCents,
   planEbayOrderLines,
   refundScope,
   trackingUploads,
@@ -91,6 +92,23 @@ test('a refund on one line does not name the other lines', () => {
   assert.deepEqual(refundScope({ ...partial, orderPaymentStatus: 'FULLY_REFUNDED' }), { scope: 'order', skus: [] });
   assert.deepEqual(
     refundScope({ ...partial, lineItems: partial.lineItems?.map((line) => ({ ...line, refunds: [] })) }),
-    { scope: 'none', skus: [] },
+    { scope: 'amount', skus: [] },
+  );
+});
+
+test('amount-only partial refunds sum paymentSummary refunds', () => {
+  const cents = orderRefundAmountCents({
+    orderPaymentStatus: 'PARTIALLY_REFUNDED',
+    paymentSummary: { refunds: [{ amount: { value: '10.00' } }, { amount: { value: '2.50' } }] },
+    lineItems: [{ sku: '101' }],
+  });
+  assert.equal(cents, 1250);
+  assert.deepEqual(
+    refundScope({
+      orderPaymentStatus: 'PARTIALLY_REFUNDED',
+      lineItems: [{ sku: '101' }],
+      paymentSummary: { refunds: [{ amount: { value: '10.00' } }] },
+    }),
+    { scope: 'amount', skus: [] },
   );
 });

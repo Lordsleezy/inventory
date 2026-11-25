@@ -5,6 +5,7 @@ import { dayPart, firstName } from './homeGreeting';
 import type { NavState } from './navigation';
 import { ASSOCIATE_LINKS, OWNER_JUMP_LINKS, type DeskAccess } from './deskNav';
 import { loadMyPayoutDue, viewerIsJacob } from './homeDesk';
+import { formatPayoutDue } from './homePayoutDue';
 import { loadOwnerHome, type OwnerHomePayload } from './ownerHome';
 
 type Props = {
@@ -94,9 +95,9 @@ export function HomePage({ displayName, email, deskAccess, pulse, client, access
           <h1 className="desk-hello">{hello}, {name}.</h1>
         </div>
         {isJacob && (
-          <div className="desk-payout-due">
+          <div className={`desk-payout-due${payoutDue != null && payoutDue < 0 ? ' is-negative' : ''}`}>
             <span>Current payout due</span>
-            <strong>{payoutDue == null ? '…' : money(payoutDue)}</strong>
+            <strong>{payoutDue == null ? '…' : formatPayoutDue(payoutDue, money)}</strong>
           </div>
         )}
       </div>

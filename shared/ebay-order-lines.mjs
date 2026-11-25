@@ -95,7 +95,8 @@ export function ebayLineRepair(plans, existing) {
 
 /**
  * A full cancel voids every line. A partial refund voids only the lines eBay
- * names. If eBay does not say which line, nothing is touched.
+ * names. Amount-only PARTIALLY_REFUNDED (no per-line refunds) uses scope
+ * "amount" so Floor can open a Returns desk row for the dollar refund.
  */
 export function refundScope(order) {
   const payment = String(order?.orderPaymentStatus || "").toUpperCase();
@@ -110,7 +111,31 @@ export function refundScope(order) {
     const sku = String(line.sku);
     if (!skus.includes(sku)) skus.push(sku);
   }
-  return { scope: skus.length ? "lines" : "none", skus };
+  if (skus.length) return { scope: "lines", skus };
+  return { scope: "amount", skus: [] };
+}
+
+/** Sum of refund dollars eBay already paid on this order (cents). */
+export function orderRefundAmountCents(order) {
+  let total = 0;
+  const summaryRefunds = order?.paymentSummary?.refunds;
+  if (Array.isArray(summaryRefunds)) {
+    for (const row of summaryRefunds) {
+      total += toCents(row?.amount?.value ?? row?.refundAmount?.value ?? row?.amount);
+    }
+  }
+  if (total > 0) return total;
+  for (const line of order?.lineItems || []) {
+    for (const row of line?.refunds || []) {
+      total += toCents(row?.amount?.value ?? row?.refundAmount?.value ?? row?.amount);
+    }
+  }
+  if (total > 0) return total;
+  // Some payloads only show the remaining price after a partial refund.
+  const original = toCents(order?.pricingSummary?.priceSubtotal?.value);
+  const totalPrice = toCents(order?.pricingSummary?.total?.value);
+  if (original > 0 && totalPrice >= 0 && totalPrice < original) return original - totalPrice;
+  return 0;
 }
 
 /** One eBay order number is one tracking upload, even when Floor has a row per line. */

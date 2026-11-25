@@ -83,11 +83,12 @@ export function mapEbayReturn(row) {
     shippingCents,
   });
   const state = String(row?.state || row?.status || "RETURN_REQUESTED").toLowerCase();
+  // Refunded/closed money on eBay still leaves the garage Open for Mark received.
   let status = "requested";
-  if (/in_transit|shipped/.test(state) && !/ready_to_ship|ready_for_shipping/.test(state)) status = "in_transit";
+  if (/rejected|declined/.test(state)) status = "denied";
   else if (/delivered|received/.test(state)) status = "received";
-  else if (/closed|refunded/.test(state)) status = "closed";
-  else if (/rejected|declined/.test(state)) status = "denied";
+  else if (/in_transit|shipped/.test(state) && !/ready_to_ship|ready_for_shipping/.test(state)) status = "in_transit";
+  const alreadyRefunded = /refunded|closed/.test(state) && !/rejected|declined/.test(state);
   const item = row?.creationInfo?.item || row?.item || {};
   return {
     channel: "ebay",
@@ -97,7 +98,7 @@ export function mapEbayReturn(row) {
     reason: remorse ? "buyer_remorse" : SNAD.test(blob) ? "not_as_described" : reason || "other",
     fault: remorse ? "buyer" : SNAD.test(blob) ? "seller" : "unknown",
     status,
-    needs_decision: !/closed|refunded|rejected/.test(state),
+    needs_decision: !alreadyRefunded && !/rejected|declined/.test(state),
     refund_cents: plan.refundCents,
     item_cents: itemCents,
     shipping_cents: shippingCents,
@@ -108,6 +109,7 @@ export function mapEbayReturn(row) {
     carrier: row?.returnShipmentInfo?.shipmentTracking?.carrierEnum || null,
     ebay_item_id: String(row?.creationInfo?.item?.itemId || row?.itemId || ""),
     raw_state: state,
+    already_refunded: alreadyRefunded,
   };
 }
 
@@ -246,7 +248,7 @@ export async function syncEbayReturns(storeId, account) {
       || detail?.detail?.returnShipmentInfo?.shipmentTracking?.carrierEnum
       || detail?.detail?.replacementShipmentInfo?.shipmentTracking?.carrierEnum
       || null;
-    saved.push(await ingestReturnRow(storeId, {
+    const ingested = await ingestReturnRow(storeId, {
       ...row,
       sku,
       item_cents: itemCents,
@@ -258,7 +260,30 @@ export async function syncEbayReturns(storeId, account) {
       carrier,
       return_kind: kind,
       force_physical_return: true,
-    }));
+    });
+    // Seller already refunded on eBay: stamp refunded_at so Confirm refund hides,
+    // but leave the row Open for Mark received / Back in stock.
+    const actual =
+      moneyValue(detail?.detail?.refundInfo?.actualRefundDetail?.totalAmount)
+      || moneyValue(detail?.refundInfo?.actualRefundDetail?.totalAmount)
+      || 0;
+    if ((row.already_refunded || actual > 0) && ingested?.id && !ingested.refunded_at) {
+      const sb = serviceClient();
+      const now = new Date().toISOString();
+      await sb.from("returns").update({
+        refund_cents: Math.max(refundCents, actual, Number(ingested.refund_cents) || 0),
+        refunded_at: now,
+        closed_at: null,
+        needs_decision: false,
+        status: ["closed", "dispositioned", "refunded_no_return"].includes(String(ingested.status || ""))
+          ? "requested"
+          : ingested.status,
+        updated_at: now,
+      }).eq("id", ingested.id);
+      await sb.rpc("return_apply_owner_profit_refund", { p_return_id: ingested.id }).catch(() => null);
+      ingested.refunded_at = now;
+    }
+    saved.push(ingested);
   }
   return { ok: true, count: saved.length, username: account.username };
 }

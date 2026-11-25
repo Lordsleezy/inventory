@@ -717,7 +717,9 @@ export function ReturnsSimplified({ client, storeId: _storeId, money, stamp, var
               ? 'In-store return. The refund comes off this sale. Choose where the unit goes.'
               : keeps
                 ? 'The refund comes out of the split: Paul and Jacob lose their percent, Steve the rest.'
-                : 'Refund comes from eBay. Paul and Jacob lose their percent of it, Steve the rest. Status updates on its own once tracking is added.'}
+                : selected.refunded_at
+                  ? 'Refund already issued on eBay. Mark received when the package comes back, then Back in stock or Defective.'
+                  : 'Refund comes from eBay. Paul and Jacob lose their percent of it, Steve the rest. Status updates on its own once tracking is added.'}
         </p>
 
         {showStatusActions && (

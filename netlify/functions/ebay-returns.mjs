@@ -27,12 +27,14 @@ function planFallbackItem(row) {
 async function finishEbayRefund(sb, storeId, row, refundCents) {
   void storeId;
   const now = new Date().toISOString();
+  // Keep Open so staff can Mark received when the package comes back.
+  const reopen = ["closed", "dispositioned", "refunded_no_return"].includes(String(row.status || ""));
   await sb.from("returns").update({
     refund_cents: refundCents,
-    status: "closed",
     refunded_at: now,
-    closed_at: now,
+    closed_at: null,
     needs_decision: false,
+    ...(reopen ? { status: "requested" } : {}),
     updated_at: now,
   }).eq("id", row.id);
   // Profit drops by the refund. Commissions refreeze on the lower base:
@@ -63,7 +65,7 @@ async function handle(event) {
   const returnId = String(body.return_id || "");
   if (!returnId) return json(400, { error: "return_id_required" });
   const sb = serviceClient();
-  const { data: row, error } = await sb.from("returns").select("id,external_return_id,refund_cents,raw,channel,reason,fault,sale_id,refunded_at,sku,return_label_cents,label_paid_by").eq("store_id", ctx.storeId).eq("id", returnId).maybeSingle();
+  const { data: row, error } = await sb.from("returns").select("id,external_return_id,refund_cents,raw,channel,reason,fault,sale_id,refunded_at,status,sku,return_label_cents,label_paid_by").eq("store_id", ctx.storeId).eq("id", returnId).maybeSingle();
   if (error) return json(500, { error: error.message });
   if (!row || row.channel !== "ebay") return json(404, { error: "ebay_return_not_found" });
   const ebayId = row.external_return_id;

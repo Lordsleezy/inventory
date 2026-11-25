@@ -15,5 +15,10 @@ test('staff Home renders associate desk when not fullAccess', async () => {
   assert.match(src, /Current payout due/);
   assert.match(src, /viewerIsJacob/);
   assert.match(src, /desk-attention/);
-  assert.match(src, /<div className="desk-payout-due">/);
+  assert.match(src, /desk-grid is-associate/);
+  assert.match(src, /formatPayoutDue/);
+  assert.match(src, /is-negative/);
+  assert.match(src, /desk-payout-due/);
+  assert.match(src, /Verify weight/);
+  assert.match(src, /Your desk/);
 });

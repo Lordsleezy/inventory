@@ -134,12 +134,13 @@ export async function loadHomeDesk(client: SupabaseClient, token: string, storeI
   return { missingCost: missing, returnsUntracked: returns, owed, channels, booksIssues: books };
 }
 
-/** Jacob's current payout due. Null when this login is not Jacob. */
+/** Jacob's current payout due. Null when this login is not Jacob. Can be negative after refunds. */
 export async function loadMyPayoutDue(client: SupabaseClient): Promise<number | null> {
   const res = await client.rpc('portal_my_payout_due');
   if (res.error) throw res.error;
   if (res.data == null) return null;
-  return Number(res.data);
+  const cents = Number(res.data);
+  return Number.isFinite(cents) ? cents : null;
 }
 
 export async function loadOwedPeople(client: SupabaseClient, storeId: string): Promise<OwedPerson[]> {
